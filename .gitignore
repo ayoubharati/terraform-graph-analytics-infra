@@ -1,37 +1,95 @@
-# Local .terraform directories
+# Terraform State & Lock Files
 .terraform/
-
-# .tfstate files
+.terraform.lock.hcl
 *.tfstate
 *.tfstate.*
+*.tfstate.backup
+.terraform.tfstate.lock.info
 
-# Crash log files
+# Terraform Variable Files (may contain sensitive data)
+*.tfvars
+*.tfvars.json
+terraform.tfvars
+*.auto.tfvars
+
+# Terraform Plan Files
+*.tfplan
+tfplan
+
+# Crash Logs
 crash.log
 crash.*.log
 
-# Exclude all .tfvars files, which are likely to contain sensitive data, such as
-# password, private keys, and other secrets. These should not be part of version 
-# control as they are data points which are potentially sensitive and subject 
-# to change depending on the environment.
-*.tfvars
-*.tfvars.json
-
-# Ignore override files as they are usually used to override resources locally and so
-# are not checked in
+# Override Files
 override.tf
 override.tf.json
 *_override.tf
 *_override.tf.json
 
-# Ignore transient lock info files created by terraform apply
-.terraform.tfstate.lock.info
-
-# Include override files you do wish to add to version control using negated pattern
-# !example_override.tf
-
-# Include tfplan files to ignore the plan output of command: terraform plan -out=tfplan
-# example: *tfplan*
-
-# Ignore CLI configuration files
+# CLI Configuration
 .terraformrc
 terraform.rc
+
+# AWS Credentials & Secrets (CRITICAL!)
+*.csv
+*accessKeys*
+*credentials*
+.aws/
+*.pem
+*.key
+*.p12
+*.pfx
+
+# Environment-Specific Files
+env/*.tfvars
+env/*.csv
+env/.env
+.env
+.env.*
+
+# IDE & Editor Files
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+.project
+.settings/
+*.sublime-*
+
+# OS Files
+.DS_Store
+.DS_Store?
+._*
+.Spotlight-V100
+.Trashes
+ehthumbs.db
+Thumbs.db
+Desktop.ini
+
+# Logs
+*.log
+logs/
+*.log.*
+
+# Backup Files
+*.backup
+*.bak
+*.tmp
+*~
+
+# Zip & Archive Files
+*.zip
+*.tar.gz
+*.rar
+
+# Python (if using scripts)
+__pycache__/
+*.py[cod]
+*.egg-info/
+venv/
+.venv/
+
+# Node (if using tools)
+node_modules/
+package-lock.json
