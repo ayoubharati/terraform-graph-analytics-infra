@@ -1,0 +1,61 @@
+#!/bin/bash
+# Ansible Managed - Neo4j Backup Script
+
+set -e
+
+# Configuration
+BACKUP_DIR="/data/neo4j/backups"
+S3_BUCKET="{{ backup_s3_bucket }}"
+RETENTION_DAYS=7
+DATE=$(date +%Y-%m-%d_%H-%M-%S)
+BACKUP_NAME="neo4j-backup-${DATE}"
+
+# Create backup directory
+mkdir -p ${BACKUP_DIR}
+
+# Log function
+log() {
+    echo "[$(date '+%Y-%m-%d %H:%M:%S')] $1"
+}
+
+log "Starting Neo4j backup: ${BACKUP_NAME}"
+
+# Stop Neo4j for consistent backup
+log "Stopping Neo4j service..."
+systemctl stop neo4j
+
+# Create backup
+log "Creating backup..."
+neo4j-admin database dump neo4j --to-path=${BACKUP_DIR}/${BACKUP_NAME}.dump
+
+# Start Neo4j
+log "Starting Neo4j service..."
+systemctl start neo4j
+
+# Compress backup
+log "Compressing backup..."
+gzip ${BACKUP_DIR}/${BACKUP_NAME}.dump
+
+# Upload to S3
+log "Uploading to S3..."
+aws s3 cp ${BACKUP_DIR}/${BACKUP_NAME}.dump.gz s3://${S3_BUCKET}/backups/neo4j/${BACKUP_NAME}.dump.gz
+
+# Clean up old local backups
+log "Cleaning up old backups..."
+find ${BACKUP_DIR} -name "neo4j-backup-*.dump.gz" -mtime +${RETENTION_DAYS} -delete
+
+# Clean up old S3 backups
+log "Cleaning up old S3 backups..."
+aws s3 ls s3://${S3_BUCKET}/backups/neo4j/ | while read -r line; do
+    createDate=$(echo $line | awk '{print $1" "$2}')
+    createDate=$(date -d "$createDate" +%s)
+    olderThan=$(date -d "-${RETENTION_DAYS} days" +%s)
+    if [[ $createDate -lt $olderThan ]]; then
+        fileName=$(echo $line | awk '{print $4}')
+        if [ ! -z "$fileName" ]; then
+            aws s3 rm s3://${S3_BUCKET}/backups/neo4j/$fileName
+        fi
+    fi
+done
+
+log "Backup completed successfully: ${BACKUP_NAME}"

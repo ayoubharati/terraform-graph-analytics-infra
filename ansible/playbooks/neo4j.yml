@@ -1,0 +1,229 @@
+---
+# =============================================================================
+# NEO4J PLAYBOOK - Install and configure Neo4j Community Edition
+# =============================================================================
+
+- name: Configure Neo4j Database
+  hosts: neo4j
+  gather_facts: true
+  become: true
+  vars_files:
+    - ../variables/main.yml
+    - ../variables/secrets.yml
+  
+  tasks:
+    # -------------------------------------------------------------------------
+    # Add Neo4j Repository
+    # -------------------------------------------------------------------------
+    - name: Install required packages for repository
+      apt:
+        name:
+          - apt-transport-https
+          - ca-certificates
+          - gnupg
+        state: present
+      tags: [neo4j, repo]
+
+    - name: Add Neo4j GPG key
+      apt_key:
+        url: https://debian.neo4j.com/neotechnology.gpg.key
+        state: present
+      tags: [neo4j, repo]
+
+    - name: Add Neo4j repository
+      apt_repository:
+        repo: "deb https://debian.neo4j.com stable 5"
+        state: present
+        filename: neo4j
+      tags: [neo4j, repo]
+
+    - name: Update apt cache
+      apt:
+        update_cache: yes
+      tags: [neo4j, repo]
+
+    - name: Install Java 17 (Required for Neo4j 5.x)
+      apt:
+        name: openjdk-17-jdk
+        state: present
+      tags: [neo4j, java]
+
+    # -------------------------------------------------------------------------
+    # Install Neo4j
+    # -------------------------------------------------------------------------
+    - name: Install Neo4j Community Edition
+      apt:
+        name: neo4j
+        state: present
+      tags: [neo4j, install]
+
+    # -------------------------------------------------------------------------
+    # Configure Neo4j
+    # -------------------------------------------------------------------------
+    - name: Configure Neo4j - Listen on all interfaces
+      lineinfile:
+        path: /etc/neo4j/neo4j.conf
+        regexp: "{{ item.regexp }}"
+        line: "{{ item.line }}"
+        create: yes
+      loop:
+        # Network configuration
+        - { regexp: '^#?server.default_listen_address=', line: 'server.default_listen_address=0.0.0.0' }
+        - { regexp: '^#?server.bolt.listen_address=', line: 'server.bolt.listen_address=0.0.0.0:7687' }
+        - { regexp: '^#?server.http.listen_address=', line: 'server.http.listen_address=0.0.0.0:7474' }
+        - { regexp: '^#?server.https.listen_address=', line: 'server.https.listen_address=0.0.0.0:7473' }
+        # Memory configuration
+        - { regexp: '^#?server.memory.heap.initial_size=', line: 'server.memory.heap.initial_size={{ neo4j_heap_initial_size }}' }
+        - { regexp: '^#?server.memory.heap.max_size=', line: 'server.memory.heap.max_size={{ neo4j_heap_max_size }}' }
+        - { regexp: '^#?server.memory.pagecache.size=', line: 'server.memory.pagecache.size={{ neo4j_pagecache_size }}' }
+        # Logging
+        - { regexp: '^#?server.directories.logs=', line: 'server.directories.logs=/var/log/neo4j' }
+      notify: Restart Neo4j
+      tags: [neo4j, config]
+
+    - name: Configure APOC plugin (if needed)
+      blockinfile:
+        path: /etc/neo4j/neo4j.conf
+        block: |
+          # APOC Configuration
+          dbms.security.procedures.unrestricted=apoc.*
+          dbms.security.procedures.allowlist=apoc.*
+        marker: "# {mark} ANSIBLE MANAGED - APOC CONFIG"
+      notify: Restart Neo4j
+      tags: [neo4j, config]
+
+    # -------------------------------------------------------------------------
+    # Create Data Directories
+    # -------------------------------------------------------------------------
+    - name: Create Neo4j data directory
+      file:
+        path: /data/neo4j
+        state: directory
+        owner: neo4j
+        group: neo4j
+        mode: '0755'
+      tags: [neo4j, directories]
+
+    - name: Create Neo4j import directory
+      file:
+        path: /var/lib/neo4j/import
+        state: directory
+        owner: neo4j
+        group: neo4j
+        mode: '0755'
+      tags: [neo4j, directories]
+
+    # -------------------------------------------------------------------------
+    # Start Neo4j Service
+    # -------------------------------------------------------------------------
+    - name: Enable and start Neo4j
+      systemd:
+        name: neo4j
+        enabled: yes
+        state: started
+      tags: [neo4j, service]
+
+    - name: Wait for Neo4j to start
+      wait_for:
+        port: "{{ neo4j_bolt_port }}"
+        delay: 15
+        timeout: 120
+      tags: [neo4j, service]
+
+    # -------------------------------------------------------------------------
+    # Set Initial Password
+    # -------------------------------------------------------------------------
+    - name: Check if password has been set
+      stat:
+        path: /var/lib/neo4j/.password_set
+      register: password_set
+      tags: [neo4j, password]
+
+    - name: Set Neo4j admin password
+      command: >
+        neo4j-admin dbms set-initial-password "{{ neo4j_admin_password }}"
+      when: not password_set.stat.exists
+      ignore_errors: true
+      tags: [neo4j, password]
+
+    - name: Mark password as set
+      file:
+        path: /var/lib/neo4j/.password_set
+        state: touch
+        mode: '0600'
+      when: not password_set.stat.exists
+      tags: [neo4j, password]
+
+    - name: Restart Neo4j after password change
+      systemd:
+        name: neo4j
+        state: restarted
+      when: not password_set.stat.exists
+      tags: [neo4j, password]
+
+    # -------------------------------------------------------------------------
+    # Install APOC Plugin
+    # -------------------------------------------------------------------------
+    - name: Get Neo4j version
+      command: neo4j version
+      register: neo4j_version_output
+      changed_when: false
+      tags: [neo4j, apoc]
+
+    - name: Download APOC plugin
+      get_url:
+        url: "https://github.com/neo4j/apoc/releases/download/5.15.0/apoc-5.15.0-core.jar"
+        dest: /var/lib/neo4j/plugins/apoc-core.jar
+        owner: neo4j
+        group: neo4j
+        mode: '0644'
+      notify: Restart Neo4j
+      ignore_errors: true
+      tags: [neo4j, apoc]
+
+    # -------------------------------------------------------------------------
+    # Backup Script
+    # -------------------------------------------------------------------------
+    - name: Create backup script
+      template:
+        src: ../roles/neo4j/templates/neo4j-backup.sh.j2
+        dest: /usr/local/bin/neo4j-backup.sh
+        mode: '0755'
+      when: enable_neo4j_backup
+      tags: [neo4j, backup]
+
+    - name: Create backup cron job
+      cron:
+        name: "Neo4j backup"
+        minute: "0"
+        hour: "2"
+        job: "/usr/local/bin/neo4j-backup.sh >> /var/log/neo4j/backup.log 2>&1"
+        user: neo4j
+      when: enable_neo4j_backup
+      tags: [neo4j, backup]
+
+    # -------------------------------------------------------------------------
+    # Health Check
+    # -------------------------------------------------------------------------
+    - name: Wait for Neo4j HTTP to be accessible
+      wait_for:
+        port: "{{ neo4j_http_port }}"
+        delay: 10
+        timeout: 120
+      tags: [neo4j, verify]
+
+    - name: Print Neo4j setup completion
+      debug:
+        msg: |
+          ✅ Neo4j installation completed!
+          Browser: http://{{ ansible_host }}:{{ neo4j_http_port }}
+          Bolt: bolt://{{ ansible_host }}:{{ neo4j_bolt_port }}
+          Username: neo4j
+          Password: (see secrets.yml)
+      tags: [neo4j, verify]
+
+  handlers:
+    - name: Restart Neo4j
+      systemd:
+        name: neo4j
+        state: restarted

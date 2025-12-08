@@ -1,0 +1,55 @@
+# Ansible Managed - Spark Defaults Configuration
+
+# Master URL
+spark.master                     spark://{{ spark_master_host }}:{{ spark_master_port }}
+
+# Application name (can be overridden)
+spark.app.name                   GraphAnalytics
+
+# Driver Configuration
+spark.driver.memory              {{ spark_driver_memory }}
+spark.driver.maxResultSize       2g
+
+# Executor Configuration
+spark.executor.memory            {{ spark_executor_memory }}
+spark.executor.cores             {{ spark_worker_cores }}
+
+# Serialization
+spark.serializer                 org.apache.spark.serializer.KryoSerializer
+spark.kryoserializer.buffer.max  256m
+
+# Network
+spark.network.timeout            300s
+spark.rpc.askTimeout             300s
+
+# UI
+spark.ui.enabled                 true
+spark.ui.port                    4040
+
+# Event Logging
+spark.eventLog.enabled           true
+spark.eventLog.dir               file:///var/log/spark/events
+
+# SQL Configuration
+spark.sql.shuffle.partitions     200
+spark.sql.adaptive.enabled       true
+
+# AWS S3 Configuration
+spark.hadoop.fs.s3a.impl                        org.apache.hadoop.fs.s3a.S3AFileSystem
+spark.hadoop.fs.s3a.aws.credentials.provider    com.amazonaws.auth.InstanceProfileCredentialsProvider
+spark.hadoop.fs.s3a.endpoint                    s3.{{ aws_region }}.amazonaws.com
+
+# GraphX Configuration
+spark.graphx.pregel.checkpointInterval          10
+
+# Neo4j Spark Connector
+spark.neo4j.url                  bolt://{{ neo4j_host }}:{{ neo4j_bolt_port }}
+spark.neo4j.authentication.type  basic
+spark.neo4j.authentication.basic.username neo4j
+# Password should be passed at runtime: --conf spark.neo4j.authentication.basic.password=...
+
+# Speculation
+spark.speculation                false
+
+# Dynamic Allocation (disabled for standalone)
+spark.dynamicAllocation.enabled  false

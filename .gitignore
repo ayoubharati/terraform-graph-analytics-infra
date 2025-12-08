@@ -93,3 +93,10 @@ venv/
 # Node (if using tools)
 node_modules/
 package-lock.json
+
+# Ansible
+ansible/*.retry
+ansible/logs/*.log
+ansible/logs/*.json
+**/secrets.yml
+!**/secrets.yml.example

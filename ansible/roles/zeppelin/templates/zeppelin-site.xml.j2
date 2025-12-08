@@ -1,0 +1,78 @@
+<?xml version="1.0"?>
+<?xml-stylesheet type="text/xsl" href="configuration.xsl"?>
+<!--
+   Ansible Managed - Zeppelin Site Configuration
+-->
+<configuration>
+    <!-- Server Configuration -->
+    <property>
+        <name>zeppelin.server.addr</name>
+        <value>0.0.0.0</value>
+        <description>Server binding address</description>
+    </property>
+    
+    <property>
+        <name>zeppelin.server.port</name>
+        <value>{{ zeppelin_port }}</value>
+        <description>Server port</description>
+    </property>
+
+    <property>
+        <name>zeppelin.server.context.path</name>
+        <value>/</value>
+        <description>Context path for web application</description>
+    </property>
+
+    <!-- Notebook Configuration -->
+    <property>
+        <name>zeppelin.notebook.dir</name>
+        <value>{{ zeppelin_home }}/notebook</value>
+        <description>Notebook directory</description>
+    </property>
+
+    <property>
+        <name>zeppelin.notebook.homescreen</name>
+        <value></value>
+        <description>Home screen notebook</description>
+    </property>
+
+    <!-- Interpreter Configuration -->
+    <property>
+        <name>zeppelin.interpreter.connect.timeout</name>
+        <value>120000</value>
+        <description>Interpreter connect timeout in ms</description>
+    </property>
+
+    <property>
+        <name>zeppelin.interpreter.output.limit</name>
+        <value>102400</value>
+        <description>Output limitation for interpreter</description>
+    </property>
+
+    <!-- Security Configuration -->
+    <property>
+        <name>zeppelin.anonymous.allowed</name>
+        <value>true</value>
+        <description>Allow anonymous access</description>
+    </property>
+
+    <!-- Websocket Configuration -->
+    <property>
+        <name>zeppelin.websocket.max.text.message.size</name>
+        <value>10240000</value>
+        <description>Max text message size</description>
+    </property>
+
+    <!-- Spark Configuration -->
+    <property>
+        <name>zeppelin.spark.maxResult</name>
+        <value>10000</value>
+        <description>Max number of Spark results</description>
+    </property>
+
+    <property>
+        <name>zeppelin.spark.enableSupportedVersionCheck</name>
+        <value>false</value>
+        <description>Enable Spark version check</description>
+    </property>
+</configuration>

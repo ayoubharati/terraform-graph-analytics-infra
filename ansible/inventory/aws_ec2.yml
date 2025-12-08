@@ -1,0 +1,37 @@
+# Dynamic AWS EC2 Inventory
+# This automatically discovers EC2 instances by tags
+plugin: aws_ec2
+regions:
+  - eu-central-1
+
+# AWS credentials (uses ~/.aws/credentials or environment variables)
+# boto_profile: default
+
+# Filter instances by project tag
+filters:
+  tag:Name:
+    - hajar-project-zeppelin
+    - hajar-project-spark-worker
+    - hajar-project-neo4j
+  instance-state-name: running
+
+# Group instances by their tags
+keyed_groups:
+  # Group by Role tag (creates: role_zeppelin, role_spark, role_neo4j)
+  - key: tags.Role
+    prefix: role
+  # Group by Name tag
+  - key: tags.Name
+    prefix: name
+  # Group by environment
+  - key: tags.Environment
+    prefix: env
+
+# Use private IP for connections (instances in VPC)
+compose:
+  ansible_host: private_ip_address
+
+# Host variables
+hostnames:
+  - tag:Name
+  - private-ip-address

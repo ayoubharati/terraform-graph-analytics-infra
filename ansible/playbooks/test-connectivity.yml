@@ -1,0 +1,53 @@
+---
+# =============================================================================
+# CONNECTIVITY TEST PLAYBOOK
+# =============================================================================
+# Runs connectivity tests on all instances and collects results
+#
+# Usage:
+#   ansible-playbook playbooks/test-connectivity.yml
+# =============================================================================
+
+- name: Run connectivity tests on all instances
+  hosts: all
+  gather_facts: true
+  become: true
+  vars_files:
+    - ../variables/main.yml
+  
+  tasks:
+    - name: Copy connectivity test script
+      copy:
+        src: ../scripts/connectivity_test.py
+        dest: /opt/analytics/connectivity_test.py
+        mode: '0755'
+      tags: [test]
+
+    - name: Run connectivity test
+      command: python3 /opt/analytics/connectivity_test.py
+      register: test_output
+      ignore_errors: true
+      tags: [test]
+
+    - name: Display test results
+      debug:
+        var: test_output.stdout_lines
+      tags: [test]
+
+    - name: Fetch test results file
+      fetch:
+        src: "/opt/analytics/connectivity_test_{{ ansible_date_time.date | replace('-','') }}_*.json"
+        dest: "../logs/{{ inventory_hostname }}/"
+        flat: yes
+      ignore_errors: true
+      tags: [test]
+
+    - name: Test summary
+      debug:
+        msg: |
+          ==========================================
+          Instance: {{ inventory_hostname }}
+          IP: {{ ansible_host }}
+          Test Status: {{ 'PASSED' if test_output.rc == 0 else 'FAILED' }}
+          ==========================================
+      tags: [test]

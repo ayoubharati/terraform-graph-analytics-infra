@@ -1,0 +1,31 @@
+#!/bin/bash
+# Ansible Managed - Zeppelin Environment Configuration
+
+# Java
+export JAVA_HOME={{ java_home }}
+
+# Zeppelin
+export ZEPPELIN_HOME={{ zeppelin_home }}
+export ZEPPELIN_PORT={{ zeppelin_port }}
+export ZEPPELIN_ADDR=0.0.0.0
+export ZEPPELIN_LOG_DIR={{ zeppelin_home }}/logs
+export ZEPPELIN_PID_DIR={{ zeppelin_home }}/run
+export ZEPPELIN_NOTEBOOK_DIR={{ zeppelin_home }}/notebook
+
+# Memory settings
+export ZEPPELIN_MEM="-Xms1024m -Xmx2048m -XX:MaxPermSize=512m"
+export ZEPPELIN_INTP_MEM="-Xms512m -Xmx1024m"
+
+# Spark Configuration
+export SPARK_HOME={{ spark_home }}
+export SPARK_MASTER={{ zeppelin_spark_master }}
+
+# Python
+export PYSPARK_PYTHON={{ zeppelin_python_interpreter }}
+export PYSPARK_DRIVER_PYTHON={{ zeppelin_python_interpreter }}
+
+# AWS Configuration
+export AWS_REGION={{ aws_region }}
+
+# Path
+export PATH=$JAVA_HOME/bin:$SPARK_HOME/bin:$PATH

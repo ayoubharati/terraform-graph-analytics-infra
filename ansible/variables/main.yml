@@ -1,0 +1,115 @@
+---
+# =============================================================================
+# GLOBAL VARIABLES - Hajar Graph Analytics Infrastructure
+# =============================================================================
+
+# -----------------------------------------------------------------------------
+# AWS Configuration
+# -----------------------------------------------------------------------------
+aws_region: "eu-central-1"
+s3_data_bucket: "hajar-project-datasets-euc1"
+project_name: "hajar-project"
+
+# -----------------------------------------------------------------------------
+# Java Configuration
+# -----------------------------------------------------------------------------
+java_version: "11"
+java_home: "/usr/lib/jvm/java-11-openjdk-amd64"
+
+# -----------------------------------------------------------------------------
+# Apache Spark Configuration
+# -----------------------------------------------------------------------------
+spark_version: "3.5.0"
+spark_hadoop_version: "3"
+spark_home: "/opt/spark"
+spark_download_url: "https://archive.apache.org/dist/spark/spark-{{ spark_version }}/spark-{{ spark_version }}-bin-hadoop{{ spark_hadoop_version }}.tgz"
+
+# Spark resource settings (for t3.large: 2 vCPU, 8GB RAM)
+spark_worker_memory: "4g"
+spark_worker_cores: 2
+spark_executor_memory: "2g"
+spark_driver_memory: "2g"
+
+# Spark ports
+spark_master_port: 7077
+spark_master_webui_port: 8081
+spark_worker_webui_port: 8082
+
+# -----------------------------------------------------------------------------
+# Apache Giraph Configuration
+# -----------------------------------------------------------------------------
+giraph_version: "1.2.0"
+giraph_home: "/opt/giraph"
+
+# -----------------------------------------------------------------------------
+# Apache Zeppelin Configuration
+# -----------------------------------------------------------------------------
+zeppelin_version: "0.10.1"
+zeppelin_home: "/opt/zeppelin"
+zeppelin_download_url: "https://dlcdn.apache.org/zeppelin/zeppelin-{{ zeppelin_version }}/zeppelin-{{ zeppelin_version }}-bin-all.tgz"
+zeppelin_port: 8080
+
+# Zeppelin interpreter settings
+zeppelin_spark_master: "spark://{{ spark_master_host }}:{{ spark_master_port }}"
+zeppelin_python_interpreter: "/usr/bin/python3"
+
+# -----------------------------------------------------------------------------
+# Neo4j Configuration
+# -----------------------------------------------------------------------------
+neo4j_version: "5.15.0"
+neo4j_edition: "community"
+neo4j_home: "/var/lib/neo4j"
+
+# Neo4j ports
+neo4j_http_port: 7474
+neo4j_https_port: 7473
+neo4j_bolt_port: 7687
+
+# Neo4j memory settings (for t3.large: 8GB RAM)
+neo4j_heap_initial_size: "1g"
+neo4j_heap_max_size: "2g"
+neo4j_pagecache_size: "2g"
+
+# -----------------------------------------------------------------------------
+# Network Configuration
+# -----------------------------------------------------------------------------
+# These will be automatically discovered or set via inventory
+spark_master_host: "{{ hostvars[groups['spark'][0]]['ansible_host'] | default('10.10.11.100') }}"
+neo4j_host: "{{ hostvars[groups['neo4j'][0]]['ansible_host'] | default('10.10.11.101') }}"
+zeppelin_host: "{{ hostvars[groups['zeppelin'][0]]['ansible_host'] | default('10.10.1.100') }}"
+
+# VPC CIDR for security rules
+vpc_cidr: "10.10.0.0/16"
+
+# -----------------------------------------------------------------------------
+# System Configuration
+# -----------------------------------------------------------------------------
+timezone: "UTC"
+locale: "en_US.UTF-8"
+
+# Packages to install on all hosts
+common_packages:
+  - curl
+  - wget
+  - git
+  - vim
+  - htop
+  - unzip
+  - jq
+  - net-tools
+  - telnet
+  - dnsutils
+  - python3-pip
+
+# -----------------------------------------------------------------------------
+# Logging Configuration
+# -----------------------------------------------------------------------------
+log_retention_days: 14
+enable_cloudwatch_logs: true
+
+# -----------------------------------------------------------------------------
+# Backup Configuration
+# -----------------------------------------------------------------------------
+enable_neo4j_backup: true
+backup_s3_bucket: "{{ s3_data_bucket }}"
+backup_schedule: "0 2 * * *"  # Daily at 2 AM UTC

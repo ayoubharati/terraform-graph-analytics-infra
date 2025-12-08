@@ -1,0 +1,209 @@
+---
+# =============================================================================
+# ZEPPELIN PLAYBOOK - Install and configure Apache Zeppelin
+# =============================================================================
+
+- name: Configure Apache Zeppelin
+  hosts: zeppelin
+  gather_facts: true
+  become: true
+  vars_files:
+    - ../variables/main.yml
+  
+  tasks:
+    # -------------------------------------------------------------------------
+    # Install Scala
+    # -------------------------------------------------------------------------
+    - name: Install Scala
+      apt:
+        name: scala
+        state: present
+      tags: [zeppelin, scala]
+
+    # -------------------------------------------------------------------------
+    # Download and Install Zeppelin
+    # -------------------------------------------------------------------------
+    - name: Check if Zeppelin is already installed
+      stat:
+        path: "{{ zeppelin_home }}/bin/zeppelin-daemon.sh"
+      register: zeppelin_installed
+      tags: [zeppelin, install]
+
+    - name: Download Apache Zeppelin
+      get_url:
+        url: "{{ zeppelin_download_url }}"
+        dest: /tmp/zeppelin.tgz
+        mode: '0644'
+        timeout: 600
+      when: not zeppelin_installed.stat.exists
+      tags: [zeppelin, install]
+
+    - name: Remove existing partial Zeppelin directory
+      file:
+        path: "{{ zeppelin_home }}"
+        state: absent
+      when: not zeppelin_installed.stat.exists
+      tags: [zeppelin, install]
+
+    - name: Extract Zeppelin
+      unarchive:
+        src: /tmp/zeppelin.tgz
+        dest: /opt
+        remote_src: yes
+      when: not zeppelin_installed.stat.exists
+      tags: [zeppelin, install]
+
+    - name: Rename Zeppelin directory
+      command: mv /opt/zeppelin-{{ zeppelin_version }}-bin-all {{ zeppelin_home }}
+      when: not zeppelin_installed.stat.exists
+      tags: [zeppelin, install]
+
+    - name: Clean up download
+      file:
+        path: /tmp/zeppelin.tgz
+        state: absent
+      tags: [zeppelin, install]
+
+    # -------------------------------------------------------------------------
+    # Configure Zeppelin
+    # -------------------------------------------------------------------------
+    - name: Create Zeppelin site configuration
+      template:
+        src: ../roles/zeppelin/templates/zeppelin-site.xml.j2
+        dest: "{{ zeppelin_home }}/conf/zeppelin-site.xml"
+        mode: '0644'
+      notify: Restart Zeppelin
+      tags: [zeppelin, config]
+
+    - name: Create Zeppelin environment configuration
+      template:
+        src: ../roles/zeppelin/templates/zeppelin-env.sh.j2
+        dest: "{{ zeppelin_home }}/conf/zeppelin-env.sh"
+        mode: '0755'
+      notify: Restart Zeppelin
+      tags: [zeppelin, config]
+
+    - name: Create notebooks directory
+      file:
+        path: "{{ zeppelin_home }}/notebook"
+        state: directory
+        mode: '0755'
+      tags: [zeppelin, config]
+
+    - name: Create logs directory
+      file:
+        path: "{{ zeppelin_home }}/logs"
+        state: directory
+        mode: '0755'
+      tags: [zeppelin, config]
+
+    # -------------------------------------------------------------------------
+    # Install additional interpreters/drivers
+    # -------------------------------------------------------------------------
+    - name: Install Neo4j Python driver
+      shell: pip3 install neo4j --break-system-packages
+      args:
+        executable: /bin/bash
+      tags: [zeppelin, drivers]
+
+    - name: Install PySpark
+      shell: pip3 install pyspark=={{ spark_version }} --break-system-packages
+      args:
+        executable: /bin/bash
+      tags: [zeppelin, drivers]
+
+    - name: Install data science packages
+      shell: pip3 install pandas numpy matplotlib seaborn networkx --break-system-packages
+      args:
+        executable: /bin/bash
+      tags: [zeppelin, drivers]
+
+    # -------------------------------------------------------------------------
+    # Install Spark Client (Driver)
+    # -------------------------------------------------------------------------
+    - name: Check if Spark is already installed
+      stat:
+        path: "{{ spark_home }}/bin/spark-submit"
+      register: spark_installed
+      tags: [zeppelin, spark-client]
+
+    - name: Download Apache Spark
+      get_url:
+        url: "{{ spark_download_url }}"
+        dest: /tmp/spark.tgz
+        mode: '0644'
+        timeout: 600
+      when: not spark_installed.stat.exists
+      tags: [zeppelin, spark-client]
+
+    - name: Extract Spark
+      unarchive:
+        src: /tmp/spark.tgz
+        dest: /opt
+        remote_src: yes
+      when: not spark_installed.stat.exists
+      tags: [zeppelin, spark-client]
+
+    - name: Rename Spark directory
+      command: mv /opt/spark-{{ spark_version }}-bin-hadoop{{ spark_hadoop_version }} {{ spark_home }}
+      when: not spark_installed.stat.exists
+      tags: [zeppelin, spark-client]
+
+    - name: Create Spark environment configuration
+      template:
+        src: ../roles/spark/templates/spark-env.sh.j2
+        dest: "{{ spark_home }}/conf/spark-env.sh"
+        mode: '0755'
+      tags: [zeppelin, spark-client]
+
+    - name: Clean up download
+      file:
+        path: /tmp/spark.tgz
+        state: absent
+      tags: [zeppelin, spark-client]
+
+    # -------------------------------------------------------------------------
+    # Create Systemd Service
+    # -------------------------------------------------------------------------
+    - name: Create Zeppelin systemd service
+      template:
+        src: ../roles/zeppelin/templates/zeppelin.service.j2
+        dest: /etc/systemd/system/zeppelin.service
+        mode: '0644'
+      notify: Restart Zeppelin
+      tags: [zeppelin, service]
+
+    - name: Reload systemd daemon
+      systemd:
+        daemon_reload: yes
+      tags: [zeppelin, service]
+
+    - name: Enable and start Zeppelin
+      systemd:
+        name: zeppelin
+        enabled: yes
+        state: started
+      tags: [zeppelin, service]
+
+    # -------------------------------------------------------------------------
+    # Health Check
+    # -------------------------------------------------------------------------
+    - name: Wait for Zeppelin to start
+      wait_for:
+        port: "{{ zeppelin_port }}"
+        delay: 10
+        timeout: 120
+      tags: [zeppelin, verify]
+
+    - name: Print Zeppelin setup completion
+      debug:
+        msg: |
+          ✅ Zeppelin installation completed!
+          URL: http://{{ ansible_host }}:{{ zeppelin_port }}
+      tags: [zeppelin, verify]
+
+  handlers:
+    - name: Restart Zeppelin
+      systemd:
+        name: zeppelin
+        state: restarted

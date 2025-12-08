@@ -1,0 +1,31 @@
+[Unit]
+Description=Apache Spark Worker
+Documentation=https://spark.apache.org/docs/latest/
+After=network.target spark-master.service
+
+[Service]
+Type=forking
+User=root
+Group=root
+
+Environment=JAVA_HOME={{ java_home }}
+Environment=SPARK_HOME={{ spark_home }}
+Environment=SPARK_WORKER_CORES={{ spark_worker_cores }}
+Environment=SPARK_WORKER_MEMORY={{ spark_worker_memory }}
+Environment=SPARK_WORKER_DIR=/data/spark
+Environment=SPARK_WORKER_WEBUI_PORT={{ spark_worker_webui_port }}
+Environment=SPARK_LOG_DIR=/var/log/spark
+Environment=SPARK_PID_DIR=/var/run/spark
+
+ExecStart={{ spark_home }}/sbin/start-worker.sh spark://{{ spark_master_host }}:{{ spark_master_port }}
+ExecStop={{ spark_home }}/sbin/stop-worker.sh
+
+Restart=on-failure
+RestartSec=10
+
+# Limits
+LimitNOFILE=65536
+LimitNPROC=65536
+
+[Install]
+WantedBy=multi-user.target

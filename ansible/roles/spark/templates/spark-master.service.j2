@@ -1,0 +1,30 @@
+[Unit]
+Description=Apache Spark Master
+Documentation=https://spark.apache.org/docs/latest/
+After=network.target
+
+[Service]
+Type=forking
+User=root
+Group=root
+
+Environment=JAVA_HOME={{ java_home }}
+Environment=SPARK_HOME={{ spark_home }}
+Environment=SPARK_MASTER_HOST={{ spark_master_host }}
+Environment=SPARK_MASTER_PORT={{ spark_master_port }}
+Environment=SPARK_MASTER_WEBUI_PORT={{ spark_master_webui_port }}
+Environment=SPARK_LOG_DIR=/var/log/spark
+Environment=SPARK_PID_DIR=/var/run/spark
+
+ExecStart={{ spark_home }}/sbin/start-master.sh
+ExecStop={{ spark_home }}/sbin/stop-master.sh
+
+Restart=on-failure
+RestartSec=10
+
+# Limits
+LimitNOFILE=65536
+LimitNPROC=65536
+
+[Install]
+WantedBy=multi-user.target

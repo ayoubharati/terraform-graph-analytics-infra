@@ -1,0 +1,151 @@
+---
+# =============================================================================
+# COMMON PLAYBOOK - Base setup for all instances
+# =============================================================================
+
+- name: Configure common settings on all instances
+  hosts: all
+  gather_facts: true
+  become: true
+  vars_files:
+    - ../variables/main.yml
+  
+  tasks:
+    # -------------------------------------------------------------------------
+    # System Updates
+    # -------------------------------------------------------------------------
+    - name: Update apt cache
+      apt:
+        update_cache: yes
+        cache_valid_time: 3600
+      tags: [common, packages]
+
+    - name: Upgrade all packages
+      apt:
+        upgrade: safe
+      tags: [common, packages]
+
+    # -------------------------------------------------------------------------
+    # Install Common Packages
+    # -------------------------------------------------------------------------
+    - name: Install common packages
+      apt:
+        name: "{{ common_packages }}"
+        state: present
+      tags: [common, packages]
+
+    # -------------------------------------------------------------------------
+    # Java Installation
+    # -------------------------------------------------------------------------
+    - name: Install OpenJDK {{ java_version }}
+      apt:
+        name: "openjdk-{{ java_version }}-jdk"
+        state: present
+      tags: [common, java]
+
+    - name: Set JAVA_HOME environment variable
+      lineinfile:
+        path: /etc/environment
+        regexp: '^JAVA_HOME='
+        line: 'JAVA_HOME={{ java_home }}'
+        create: yes
+      tags: [common, java]
+
+    - name: Add JAVA_HOME to PATH
+      lineinfile:
+        path: /etc/profile.d/java.sh
+        line: 'export PATH=$JAVA_HOME/bin:$PATH'
+        create: yes
+        mode: '0644'
+      tags: [common, java]
+
+    # -------------------------------------------------------------------------
+    # Python Setup
+    # -------------------------------------------------------------------------
+    - name: Install Python packages
+      shell: pip3 install boto3 awscli requests --break-system-packages
+      args:
+        executable: /bin/bash
+      tags: [common, python]
+
+    # -------------------------------------------------------------------------
+    # AWS CLI Configuration
+    # -------------------------------------------------------------------------
+    - name: Create AWS CLI config directory
+      file:
+        path: /root/.aws
+        state: directory
+        mode: '0700'
+      tags: [common, aws]
+
+    - name: Configure AWS CLI region
+      ini_file:
+        path: /root/.aws/config
+        section: default
+        option: region
+        value: "{{ aws_region }}"
+        mode: '0600'
+      tags: [common, aws]
+
+    # -------------------------------------------------------------------------
+    # Timezone Configuration
+    # -------------------------------------------------------------------------
+    - name: Set timezone
+      timezone:
+        name: "{{ timezone }}"
+      tags: [common, timezone]
+
+    # -------------------------------------------------------------------------
+    # System Tuning
+    # -------------------------------------------------------------------------
+    - name: Set vm.swappiness
+      sysctl:
+        name: vm.swappiness
+        value: '10'
+        state: present
+        reload: yes
+      tags: [common, tuning]
+
+    - name: Increase file descriptor limits
+      lineinfile:
+        path: /etc/security/limits.conf
+        line: "{{ item }}"
+        create: yes
+      loop:
+        - "* soft nofile 65536"
+        - "* hard nofile 65536"
+        - "* soft nproc 65536"
+        - "* hard nproc 65536"
+      tags: [common, tuning]
+
+    # -------------------------------------------------------------------------
+    # Create Project Directories
+    # -------------------------------------------------------------------------
+    - name: Create project directories
+      file:
+        path: "{{ item }}"
+        state: directory
+        mode: '0755'
+      loop:
+        - /opt/analytics
+        - /var/log/analytics
+        - /data
+      tags: [common, directories]
+
+    # -------------------------------------------------------------------------
+    # Host Entries (for internal communication)
+    # -------------------------------------------------------------------------
+    - name: Add host entries for cluster communication
+      lineinfile:
+        path: /etc/hosts
+        line: "{{ item }}"
+        create: yes
+      loop:
+        - "{{ spark_master_host }} spark-master"
+        - "{{ neo4j_host }} neo4j-server"
+        - "{{ zeppelin_host }} zeppelin-server"
+      tags: [common, network]
+
+    - name: Print common setup completion
+      debug:
+        msg: "✅ Common setup completed on {{ inventory_hostname }}"
