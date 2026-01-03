@@ -135,27 +135,10 @@ resource "aws_security_group" "spark" {
     cidr_blocks = [var.public_subnet_cidr]
   }
 
-  # Allow inbound from Zeppelin (will be added by compute module)
   ingress {
-    description = "Spark master port"
-    from_port   = 7077
-    to_port     = 7077
-    protocol    = "tcp"
-    cidr_blocks = [var.public_subnet_cidr]
-  }
-
-  ingress {
-    description = "Spark UI"
-    from_port   = 4040
-    to_port     = 4040
-    protocol    = "tcp"
-    cidr_blocks = [var.public_subnet_cidr]
-  }
-  
-  ingress {
-    description = "Spark worker web UI"
-    from_port   = 8081
-    to_port     = 8082
+    description = "Spark Internal Communication"
+    from_port   = 0
+    to_port     = 65535
     protocol    = "tcp"
     cidr_blocks = [var.public_subnet_cidr]
   }

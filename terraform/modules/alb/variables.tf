@@ -32,3 +32,8 @@ variable "zeppelin_instance_id" {
   description = "Zeppelin instance ID for target group"
   type        = string
 }
+
+variable "private_subnet_cidr" {
+  description = "Private subnet CIDR for Spark callback rules"
+  type        = string
+}

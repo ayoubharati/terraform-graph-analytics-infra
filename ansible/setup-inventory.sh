@@ -113,8 +113,8 @@ if [ ! -f "$ANSIBLE_DIR/variables/secrets.yml" ]; then
     echo "🔐 Creating secrets file..."
     cat > "$ANSIBLE_DIR/variables/secrets.yml" << EOF
 ---
-# Neo4j admin password - CHANGE THIS!
-neo4j_admin_password: "YourSecurePassword123!"
+# Neo4j admin password
+neo4j_admin_password: "bath123@@"
 EOF
     echo "  ✅ Created secrets.yml (update the password!)"
 fi

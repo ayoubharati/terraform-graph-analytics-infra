@@ -1,49 +1,113 @@
 ---
 # =============================================================================
-# ZEPPELIN PLAYBOOK - Install and configure Apache Zeppelin
+# ZEPPELIN PLAYBOOK - Complete Zeppelin + Spark Client + Data Preparation
+# =============================================================================
+# Includes: Common setup, Zeppelin, Spark driver, Data download, all configs
+# Usage: ./run.sh playbooks/zeppelin.yml
 # =============================================================================
 
-- name: Configure Apache Zeppelin
+- name: Configure Apache Zeppelin (Analytics Hub)
   hosts: zeppelin
   gather_facts: true
   become: true
   vars_files:
     - ../variables/main.yml
+    - ../variables/secrets.yml
   
   tasks:
-    # -------------------------------------------------------------------------
-    # Install Scala
-    # -------------------------------------------------------------------------
+    # =========================================================================
+    # SECTION 1: COMMON SETUP
+    # =========================================================================
+    - name: Update apt cache
+      apt:
+        update_cache: yes
+        cache_valid_time: 3600
+      tags: [common]
+
+    - name: Install common packages
+      apt:
+        name: "{{ common_packages }}"
+        state: present
+      tags: [common]
+
+    - name: Install Java
+      apt:
+        name: "openjdk-{{ java_version }}-jdk"
+        state: present
+      tags: [common]
+
     - name: Install Scala
       apt:
         name: scala
         state: present
-      tags: [zeppelin, scala]
+      tags: [common]
 
-    # -------------------------------------------------------------------------
-    # Download and Install Zeppelin
-    # -------------------------------------------------------------------------
-    - name: Check if Zeppelin is already installed
+    - name: Set JAVA_HOME
+      lineinfile:
+        path: /etc/environment
+        regexp: '^JAVA_HOME='
+        line: 'JAVA_HOME={{ java_home }}'
+        create: yes
+      tags: [common]
+
+    - name: Create project directories
+      file:
+        path: "{{ item }}"
+        state: directory
+        mode: '0755'
+      loop:
+        - /opt/analytics
+        - /var/log/analytics
+        - /data
+        - /data/datasets
+      tags: [common]
+
+    - name: Add host entries
+      lineinfile:
+        path: /etc/hosts
+        line: "{{ item }}"
+        create: yes
+      loop:
+        - "{{ spark_master_host }} spark-master"
+        - "{{ neo4j_host }} neo4j-server"
+        - "{{ zeppelin_host }} zeppelin-server"
+      tags: [common]
+
+    - name: Configure AWS CLI
+      file:
+        path: /root/.aws
+        state: directory
+        mode: '0700'
+      tags: [common]
+
+    - name: Set AWS region
+      ini_file:
+        path: /root/.aws/config
+        section: default
+        option: region
+        value: "{{ aws_region }}"
+        mode: '0600'
+      tags: [common]
+
+    # =========================================================================
+    # SECTION 2: INSTALL ZEPPELIN
+    # =========================================================================
+    - name: Check if Zeppelin is installed
       stat:
         path: "{{ zeppelin_home }}/bin/zeppelin-daemon.sh"
       register: zeppelin_installed
-      tags: [zeppelin, install]
+      tags: [zeppelin]
 
-    - name: Download Apache Zeppelin
+    - name: Download Apache Zeppelin (async - large file)
       get_url:
         url: "{{ zeppelin_download_url }}"
         dest: /tmp/zeppelin.tgz
         mode: '0644'
-        timeout: 600
+        timeout: 900
       when: not zeppelin_installed.stat.exists
-      tags: [zeppelin, install]
-
-    - name: Remove existing partial Zeppelin directory
-      file:
-        path: "{{ zeppelin_home }}"
-        state: absent
-      when: not zeppelin_installed.stat.exists
-      tags: [zeppelin, install]
+      async: 900
+      poll: 30
+      tags: [zeppelin]
 
     - name: Extract Zeppelin
       unarchive:
@@ -51,90 +115,39 @@
         dest: /opt
         remote_src: yes
       when: not zeppelin_installed.stat.exists
-      tags: [zeppelin, install]
+      tags: [zeppelin]
 
     - name: Rename Zeppelin directory
       command: mv /opt/zeppelin-{{ zeppelin_version }}-bin-all {{ zeppelin_home }}
       when: not zeppelin_installed.stat.exists
-      tags: [zeppelin, install]
+      ignore_errors: true
+      tags: [zeppelin]
 
-    - name: Clean up download
+    - name: Clean up Zeppelin download
       file:
         path: /tmp/zeppelin.tgz
         state: absent
-      tags: [zeppelin, install]
+      tags: [zeppelin]
 
-    # -------------------------------------------------------------------------
-    # Configure Zeppelin
-    # -------------------------------------------------------------------------
-    - name: Create Zeppelin site configuration
-      template:
-        src: ../roles/zeppelin/templates/zeppelin-site.xml.j2
-        dest: "{{ zeppelin_home }}/conf/zeppelin-site.xml"
-        mode: '0644'
-      notify: Restart Zeppelin
-      tags: [zeppelin, config]
-
-    - name: Create Zeppelin environment configuration
-      template:
-        src: ../roles/zeppelin/templates/zeppelin-env.sh.j2
-        dest: "{{ zeppelin_home }}/conf/zeppelin-env.sh"
-        mode: '0755'
-      notify: Restart Zeppelin
-      tags: [zeppelin, config]
-
-    - name: Create notebooks directory
-      file:
-        path: "{{ zeppelin_home }}/notebook"
-        state: directory
-        mode: '0755'
-      tags: [zeppelin, config]
-
-    - name: Create logs directory
-      file:
-        path: "{{ zeppelin_home }}/logs"
-        state: directory
-        mode: '0755'
-      tags: [zeppelin, config]
-
-    # -------------------------------------------------------------------------
-    # Install additional interpreters/drivers
-    # -------------------------------------------------------------------------
-    - name: Install Neo4j Python driver
-      shell: pip3 install neo4j --break-system-packages
-      args:
-        executable: /bin/bash
-      tags: [zeppelin, drivers]
-
-    - name: Install PySpark
-      shell: pip3 install pyspark=={{ spark_version }} --break-system-packages
-      args:
-        executable: /bin/bash
-      tags: [zeppelin, drivers]
-
-    - name: Install data science packages
-      shell: pip3 install pandas numpy matplotlib seaborn networkx --break-system-packages
-      args:
-        executable: /bin/bash
-      tags: [zeppelin, drivers]
-
-    # -------------------------------------------------------------------------
-    # Install Spark Client (Driver)
-    # -------------------------------------------------------------------------
-    - name: Check if Spark is already installed
+    # =========================================================================
+    # SECTION 3: INSTALL SPARK CLIENT
+    # =========================================================================
+    - name: Check if Spark is installed
       stat:
         path: "{{ spark_home }}/bin/spark-submit"
       register: spark_installed
-      tags: [zeppelin, spark-client]
+      tags: [spark-client]
 
-    - name: Download Apache Spark
+    - name: Download Apache Spark (async)
       get_url:
         url: "{{ spark_download_url }}"
         dest: /tmp/spark.tgz
         mode: '0644'
         timeout: 600
       when: not spark_installed.stat.exists
-      tags: [zeppelin, spark-client]
+      async: 600
+      poll: 20
+      tags: [spark-client]
 
     - name: Extract Spark
       unarchive:
@@ -142,68 +155,228 @@
         dest: /opt
         remote_src: yes
       when: not spark_installed.stat.exists
-      tags: [zeppelin, spark-client]
+      tags: [spark-client]
 
     - name: Rename Spark directory
       command: mv /opt/spark-{{ spark_version }}-bin-hadoop{{ spark_hadoop_version }} {{ spark_home }}
       when: not spark_installed.stat.exists
-      tags: [zeppelin, spark-client]
+      ignore_errors: true
+      tags: [spark-client]
+
+    - name: Clean up Spark download
+      file:
+        path: /tmp/spark.tgz
+        state: absent
+      tags: [spark-client]
+
+    # =========================================================================
+    # SECTION 4: CONFIGURE ZEPPELIN & SPARK
+    # =========================================================================
+    - name: Create Zeppelin directories
+      file:
+        path: "{{ item }}"
+        state: directory
+        mode: '0755'
+      loop:
+        - "{{ zeppelin_home }}/notebook"
+        - "{{ zeppelin_home }}/logs"
+        - "{{ zeppelin_home }}/run"
+        - "{{ spark_home }}/jars"
+      tags: [config]
+
+    - name: Create Zeppelin site configuration
+      template:
+        src: ../roles/zeppelin/templates/zeppelin-site.xml.j2
+        dest: "{{ zeppelin_home }}/conf/zeppelin-site.xml"
+        mode: '0644'
+      notify: Restart Zeppelin
+      tags: [config]
+
+    - name: Create Zeppelin environment configuration
+      template:
+        src: ../roles/zeppelin/templates/zeppelin-env.sh.j2
+        dest: "{{ zeppelin_home }}/conf/zeppelin-env.sh"
+        mode: '0755'
+      notify: Restart Zeppelin
+      tags: [config]
 
     - name: Create Spark environment configuration
       template:
         src: ../roles/spark/templates/spark-env.sh.j2
         dest: "{{ spark_home }}/conf/spark-env.sh"
         mode: '0755'
-      tags: [zeppelin, spark-client]
+      tags: [config]
 
-    - name: Clean up download
-      file:
-        path: /tmp/spark.tgz
-        state: absent
-      tags: [zeppelin, spark-client]
+    # =========================================================================
+    # SECTION 5: INSTALL PYTHON PACKAGES
+    # =========================================================================
+    - name: Install Python packages
+      shell: pip3 install neo4j pyspark=={{ spark_version }} pandas numpy matplotlib seaborn networkx boto3 kagglehub --break-system-packages
+      args:
+        executable: /bin/bash
+      async: 300
+      poll: 15
+      tags: [python]
 
-    # -------------------------------------------------------------------------
-    # Create Systemd Service
-    # -------------------------------------------------------------------------
+    # =========================================================================
+    # SECTION 6: CREATE SYSTEMD SERVICE
+    # =========================================================================
     - name: Create Zeppelin systemd service
       template:
         src: ../roles/zeppelin/templates/zeppelin.service.j2
         dest: /etc/systemd/system/zeppelin.service
         mode: '0644'
       notify: Restart Zeppelin
-      tags: [zeppelin, service]
+      tags: [service]
 
     - name: Reload systemd daemon
       systemd:
         daemon_reload: yes
-      tags: [zeppelin, service]
+      tags: [service]
 
     - name: Enable and start Zeppelin
       systemd:
         name: zeppelin
         enabled: yes
         state: started
-      tags: [zeppelin, service]
+      ignore_errors: true
+      tags: [service]
 
-    # -------------------------------------------------------------------------
-    # Health Check
-    # -------------------------------------------------------------------------
     - name: Wait for Zeppelin to start
       wait_for:
         port: "{{ zeppelin_port }}"
-        delay: 10
-        timeout: 120
-      tags: [zeppelin, verify]
+        delay: 15
+        timeout: 180
+      ignore_errors: true
+      tags: [service]
 
-    - name: Print Zeppelin setup completion
+    # =========================================================================
+    # SECTION 7: DOWNLOAD DATASET (Optional - run with tag 'data')
+    # =========================================================================
+    - name: Install AWS CLI and dependencies for data tasks
+      shell: pip3 install awscli boto3 kagglehub pandas --break-system-packages
+      args:
+        executable: /bin/bash
+      tags: [data, never]
+
+    - name: Create Kaggle directory
+      file:
+        path: /root/.kaggle
+        state: directory
+        mode: '0700'
+      tags: [data, never]
+
+    - name: Download Elliptic Dataset from Kaggle
+      shell: |
+        python3 << 'EOF'
+        import kagglehub
+        import shutil
+        import os
+
+        print("Downloading Elliptic dataset from Kaggle...")
+        path = kagglehub.dataset_download("ellipticco/elliptic-data-set")
+        print(f"Downloaded to: {path}")
+
+        dest = "/data/datasets/elliptic"
+        if os.path.exists(dest):
+            shutil.rmtree(dest)
+        shutil.copytree(path, dest)
+        print(f"Copied to: {dest}")
+        EOF
+      args:
+        executable: /bin/bash
+      environment:
+        KAGGLE_API_TOKEN: "{{ kaggle_api_token }}"
+      async: 600
+      poll: 30
+      tags: [data, never]
+
+    - name: Upload dataset to S3
+      shell: |
+        aws s3 sync /data/datasets/elliptic s3://{{ s3_data_bucket }}/elliptic/ --region {{ aws_region }}
+      async: 600
+      poll: 30
+      tags: [data, never]
+
+    - name: Prepare Neo4j import files
+      shell: |
+        python3 << 'EOF'
+        import pandas as pd
+        import os
+
+        base_path = "/data/datasets/elliptic"
+        output_path = "/data/datasets/elliptic/neo4j-import"
+        os.makedirs(output_path, exist_ok=True)
+
+        for root, dirs, files in os.walk(base_path):
+            for f in files:
+                if 'features' in f.lower() and f.endswith('.csv'):
+                    features_file = os.path.join(root, f)
+                elif 'edge' in f.lower() and f.endswith('.csv'):
+                    edges_file = os.path.join(root, f)
+                elif 'class' in f.lower() and f.endswith('.csv'):
+                    classes_file = os.path.join(root, f)
+
+        features = pd.read_csv(features_file, header=None)
+        features.columns = ['txId'] + [f'feature_{i}' for i in range(1, len(features.columns))]
+        
+        classes = pd.read_csv(classes_file)
+        if 'txId' not in classes.columns:
+            classes.columns = ['txId', 'class']
+        
+        nodes = features.merge(classes, on='txId', how='left')
+        nodes['class'] = nodes['class'].fillna('unknown')
+        class_map = {1: 'illicit', '1': 'illicit', 2: 'licit', '2': 'licit'}
+        nodes['label'] = nodes['class'].map(lambda x: class_map.get(x, 'unknown'))
+        
+        neo4j_nodes = nodes[['txId', 'label', 'feature_1']].copy()
+        neo4j_nodes.columns = ['txId:ID', 'label', 'feature1:float']
+        neo4j_nodes[':LABEL'] = 'Transaction'
+        neo4j_nodes.to_csv(f'{output_path}/nodes.csv', index=False)
+        print(f"Created nodes.csv with {len(neo4j_nodes)} transactions")
+
+        edges = pd.read_csv(edges_file)
+        if len(edges.columns) == 2:
+            edges.columns = ['txId1', 'txId2']
+        neo4j_edges = edges.copy()
+        neo4j_edges.columns = [':START_ID', ':END_ID']
+        neo4j_edges[':TYPE'] = 'TRANSFERS_TO'
+        neo4j_edges.to_csv(f'{output_path}/edges.csv', index=False)
+        print(f"Created edges.csv with {len(neo4j_edges)} relationships")
+        EOF
+      tags: [data, never]
+
+    - name: Upload Neo4j import files to S3
+      shell: |
+        aws s3 sync /data/datasets/elliptic/neo4j-import s3://{{ s3_data_bucket }}/elliptic/neo4j-import/ --region {{ aws_region }}
+      tags: [data, never]
+
+    # =========================================================================
+    # SUMMARY
+    # =========================================================================
+    - name: Print setup completion
       debug:
         msg: |
           ✅ Zeppelin installation completed!
-          URL: http://{{ ansible_host }}:{{ zeppelin_port }}
-      tags: [zeppelin, verify]
+          
+          🌐 Zeppelin URL: http://{{ ansible_host }}:{{ zeppelin_port }}
+          
+          📦 Installed Components:
+            - Apache Zeppelin {{ zeppelin_version }}
+            - Apache Spark {{ spark_version }} (client)
+            - Python packages (neo4j, pandas, numpy, etc.)
+          
+          📝 Next Steps:
+            1. Run Spark playbook: ./run.sh playbooks/spark.yml
+            2. Run Neo4j playbook: ./run.sh playbooks/neo4j.yml
+            3. Run data prep: ./run.sh playbooks/zeppelin.yml --tags data
+      tags: [always]
 
   handlers:
     - name: Restart Zeppelin
       systemd:
         name: zeppelin
         state: restarted
+      async: 60
+      poll: 0
+      ignore_errors: true

@@ -1,0 +1,74 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<?xml-stylesheet type="text/xsl" href="configuration.xsl"?>
+<!-- Ansible Managed - YARN Configuration -->
+<configuration>
+    <!-- Resource Manager hostname -->
+    <property>
+        <name>yarn.resourcemanager.hostname</name>
+        <value>localhost</value>
+    </property>
+    
+    <!-- NodeManager aux services -->
+    <property>
+        <name>yarn.nodemanager.aux-services</name>
+        <value>mapreduce_shuffle</value>
+    </property>
+    
+    <!-- NodeManager local directories -->
+    <property>
+        <name>yarn.nodemanager.local-dirs</name>
+        <value>/data/hadoop/yarn/local</value>
+    </property>
+    
+    <!-- NodeManager log directories -->
+    <property>
+        <name>yarn.nodemanager.log-dirs</name>
+        <value>/data/hadoop/yarn/logs</value>
+    </property>
+    
+    <!-- NodeManager resource settings -->
+    <property>
+        <name>yarn.nodemanager.resource.memory-mb</name>
+        <value>4096</value>
+    </property>
+    
+    <property>
+        <name>yarn.nodemanager.resource.cpu-vcores</name>
+        <value>2</value>
+    </property>
+    
+    <!-- Scheduler settings -->
+    <property>
+        <name>yarn.scheduler.minimum-allocation-mb</name>
+        <value>512</value>
+    </property>
+    
+    <property>
+        <name>yarn.scheduler.maximum-allocation-mb</name>
+        <value>4096</value>
+    </property>
+    
+    <!-- Application classpath -->
+    <property>
+        <name>yarn.application.classpath</name>
+        <value>{{ hadoop_home }}/etc/hadoop:{{ hadoop_home }}/share/hadoop/common/*:{{ hadoop_home }}/share/hadoop/common/lib/*:{{ hadoop_home }}/share/hadoop/hdfs/*:{{ hadoop_home }}/share/hadoop/hdfs/lib/*:{{ hadoop_home }}/share/hadoop/yarn/*:{{ hadoop_home }}/share/hadoop/yarn/lib/*:{{ hadoop_home }}/share/hadoop/mapreduce/*:{{ hadoop_home }}/share/hadoop/mapreduce/lib/*</value>
+    </property>
+    
+    <!-- ResourceManager webapp address -->
+    <property>
+        <name>yarn.resourcemanager.webapp.address</name>
+        <value>0.0.0.0:8088</value>
+    </property>
+    
+    <!-- Disable virtual memory check (common issue on small instances) -->
+    <property>
+        <name>yarn.nodemanager.vmem-check-enabled</name>
+        <value>false</value>
+    </property>
+    
+    <!-- Disable physical memory check -->
+    <property>
+        <name>yarn.nodemanager.pmem-check-enabled</name>
+        <value>false</value>
+    </property>
+</configuration>

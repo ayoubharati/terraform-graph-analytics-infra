@@ -1,97 +1,30 @@
 ---
 # =============================================================================
-# SITE PLAYBOOK - Master playbook to configure all infrastructure
+# SITE.YML - Run All Playbooks in Order
 # =============================================================================
+# This is the master playbook that runs everything.
+# Usage: ./run.sh playbooks/site.yml
 #
-# Usage:
-#   ansible-playbook playbooks/site.yml
-#   ansible-playbook playbooks/site.yml --tags "common"
-#   ansible-playbook playbooks/site.yml --limit "zeppelin"
+# Individual playbooks can be run separately:
+#   ./run.sh playbooks/zeppelin.yml  - Zeppelin + Spark client
+#   ./run.sh playbooks/spark.yml     - Spark Master/Worker
+#   ./run.sh playbooks/giraph.yml    - Hadoop + Giraph
+#   ./run.sh playbooks/neo4j.yml     - Neo4j database
 #
+# Optional steps (use --tags):
+#   ./run.sh playbooks/zeppelin.yml --tags data   - Download dataset
+#   ./run.sh playbooks/neo4j.yml --tags import    - Import to Neo4j
 # =============================================================================
 
-- name: Load global variables
-  hosts: all
-  gather_facts: false
-  tasks:
-    - name: Include global variables
-      include_vars: ../variables/main.yml
-    - name: Include secrets
-      include_vars: ../variables/secrets.yml
+# Run playbooks in parallel where possible
+- name: Run Zeppelin Playbook
+  import_playbook: zeppelin.yml
 
-# -----------------------------------------------------------------------------
-# Phase 1: Common setup for all instances
-# -----------------------------------------------------------------------------
-- import_playbook: common.yml
+- name: Run Spark Playbook
+  import_playbook: spark.yml
 
-# -----------------------------------------------------------------------------
-# Phase 2: Configure Zeppelin (public subnet)
-# -----------------------------------------------------------------------------
-- import_playbook: zeppelin.yml
+- name: Run Giraph Playbook
+  import_playbook: giraph.yml
 
-# -----------------------------------------------------------------------------
-# Phase 3: Configure Spark (private subnet)
-# -----------------------------------------------------------------------------
-- import_playbook: spark.yml
-
-# -----------------------------------------------------------------------------
-# Phase 4: Configure Neo4j (private subnet)
-# -----------------------------------------------------------------------------
-- import_playbook: neo4j.yml
-
-# -----------------------------------------------------------------------------
-# Phase 5: Post-configuration verification
-# -----------------------------------------------------------------------------
-- name: Verify all services
-  hosts: all
-  gather_facts: true
-  vars_files:
-    - ../variables/main.yml
-  tasks:
-    - name: Wait for services to stabilize
-      pause:
-        seconds: 30
-      run_once: true
-
-    - name: Verify Zeppelin is running
-      uri:
-        url: "http://{{ zeppelin_host }}:{{ zeppelin_port }}"
-        method: GET
-        status_code: 200
-      when: "'zeppelin' in group_names"
-      delegate_to: localhost
-      become: false
-      ignore_errors: true
-
-    - name: Verify Spark Master is running
-      uri:
-        url: "http://{{ spark_master_host }}:{{ spark_master_webui_port }}"
-        method: GET
-        status_code: 200
-      when: "'spark' in group_names"
-      delegate_to: localhost
-      become: false
-      ignore_errors: true
-
-    - name: Verify Neo4j is running
-      uri:
-        url: "http://{{ neo4j_host }}:{{ neo4j_http_port }}"
-        method: GET
-        status_code: 200
-      when: "'neo4j' in group_names"
-      delegate_to: localhost
-      become: false
-      ignore_errors: true
-
-    - name: Print completion message
-      debug:
-        msg: |
-          =====================================================
-          🎉 Infrastructure Configuration Complete!
-          =====================================================
-          Zeppelin: http://{{ zeppelin_host }}:{{ zeppelin_port }}
-          Spark Master: http://{{ spark_master_host }}:{{ spark_master_webui_port }}
-          Neo4j Browser: http://{{ neo4j_host }}:{{ neo4j_http_port }}
-          Neo4j Bolt: bolt://{{ neo4j_host }}:{{ neo4j_bolt_port }}
-          =====================================================
-      run_once: true
+- name: Run Neo4j Playbook
+  import_playbook: neo4j.yml

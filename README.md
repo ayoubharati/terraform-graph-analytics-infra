@@ -5,9 +5,9 @@ Production-grade Terraform infrastructure for graph analytics using **Apache Spa
 ## 🏗️ Architecture Overview
 
 ### Network Design
-- **VPC**: `10.10.0.0/16` in `eu-central-1`
-- **Public Subnet** (`10.10.1.0/24`): ALB + Zeppelin
-- **Private Subnet** (`10.10.11.0/24`): Spark worker + Neo4j
+- **VPC**: `[VPC_CIDR]` in `eu-central-1`
+- **Public Subnet** (`[PUBLIC_SUBNET_CIDR]`): ALB + Zeppelin
+- **Private Subnet** (`[PRIVATE_SUBNET_CIDR]`): Spark worker + Neo4j
 - **Internet Gateway**: Public internet access
 - **NAT Gateway**: Outbound-only for private instances
 - **S3 VPC Endpoint**: Free private S3 access (no NAT charges)

@@ -12,13 +12,21 @@ export ZEPPELIN_LOG_DIR={{ zeppelin_home }}/logs
 export ZEPPELIN_PID_DIR={{ zeppelin_home }}/run
 export ZEPPELIN_NOTEBOOK_DIR={{ zeppelin_home }}/notebook
 
-# Memory settings
-export ZEPPELIN_MEM="-Xms1024m -Xmx2048m -XX:MaxPermSize=512m"
-export ZEPPELIN_INTP_MEM="-Xms512m -Xmx1024m"
+# Disable Hadoop integration (we use S3 via Spark's S3A)
+export USE_HADOOP=false
+export HADOOP_CONF_DIR={{ spark_home }}/conf
+
+# Memory settings (reduced for t3.small with 2GB RAM)
+export ZEPPELIN_MEM="-Xms512m -Xmx1024m"
+export ZEPPELIN_INTP_MEM="-Xms256m -Xmx512m"
 
 # Spark Configuration
 export SPARK_HOME={{ spark_home }}
 export SPARK_MASTER={{ zeppelin_spark_master }}
+
+# Spark Driver settings (critical for Zeppelin-Spark connectivity)
+# Use --packages to ensure same jar version on driver and all executors
+export SPARK_SUBMIT_OPTIONS="--packages org.neo4j:neo4j-connector-apache-spark_2.12:5.3.0_for_spark_3,org.apache.hadoop:hadoop-aws:3.3.6,com.amazonaws:aws-java-sdk-bundle:1.12.262 --conf spark.driver.host={{ zeppelin_host }} --conf spark.driver.bindAddress=0.0.0.0 --conf spark.driver.port=32000 --conf spark.driver.blockManager.port=32001"
 
 # Python
 export PYSPARK_PYTHON={{ zeppelin_python_interpreter }}

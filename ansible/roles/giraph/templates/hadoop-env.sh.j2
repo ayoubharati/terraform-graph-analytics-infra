@@ -1,0 +1,18 @@
+#!/bin/bash
+# Ansible Managed - Hadoop Environment Configuration
+
+export JAVA_HOME={{ java_home }}
+export HADOOP_HOME={{ hadoop_home }}
+export HADOOP_CONF_DIR={{ hadoop_home }}/etc/hadoop
+export HADOOP_LOG_DIR=/var/log/hadoop
+
+# Memory settings
+export HADOOP_HEAPSIZE_MAX=1g
+export HADOOP_HEAPSIZE_MIN=512m
+
+# User running Hadoop
+export HDFS_NAMENODE_USER=ubuntu
+export HDFS_DATANODE_USER=ubuntu
+export HDFS_SECONDARYNAMENODE_USER=ubuntu
+export YARN_RESOURCEMANAGER_USER=ubuntu
+export YARN_NODEMANAGER_USER=ubuntu

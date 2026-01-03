@@ -9,6 +9,10 @@ spark.app.name                   GraphAnalytics
 # Driver Configuration
 spark.driver.memory              {{ spark_driver_memory }}
 spark.driver.maxResultSize       2g
+spark.driver.host                {{ zeppelin_host }}
+spark.driver.bindAddress         0.0.0.0
+spark.driver.port                32000
+spark.driver.blockManager.port   32001
 
 # Executor Configuration
 spark.executor.memory            {{ spark_executor_memory }}

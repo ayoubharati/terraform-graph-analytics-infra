@@ -1,0 +1,95 @@
+#!/bin/bash
+# =============================================================================
+# Giraph PageRank Benchmark Script
+# =============================================================================
+# This script runs Giraph's SimplePageRankComputation on a graph dataset
+# and measures execution time for comparison with Spark GraphX.
+# =============================================================================
+
+set -e
+
+# Configuration
+HADOOP_HOME="{{ hadoop_home }}"
+GIRAPH_HOME="{{ giraph_home }}"
+JAVA_HOME="{{ java_home }}"
+
+# Export environment
+export JAVA_HOME HADOOP_HOME GIRAPH_HOME
+export PATH=$HADOOP_HOME/bin:$HADOOP_HOME/sbin:$PATH
+
+# Input/Output paths in HDFS
+INPUT_PATH="${1:-/giraph/input/tiny_graph.txt}"
+OUTPUT_PATH="/giraph/output/pagerank_$(date +%Y%m%d_%H%M%S)"
+WORKERS="${2:-1}"
+ITERATIONS="${3:-30}"
+
+echo "=============================================="
+echo "      Giraph PageRank Benchmark"
+echo "=============================================="
+echo "Input:      $INPUT_PATH"
+echo "Output:     $OUTPUT_PATH"
+echo "Workers:    $WORKERS"
+echo "Iterations: $ITERATIONS"
+echo "=============================================="
+
+# Find Giraph JAR
+GIRAPH_JAR=$(find $GIRAPH_HOME -name "giraph-examples-*.jar" | head -1)
+
+if [ -z "$GIRAPH_JAR" ]; then
+    echo "ERROR: Could not find giraph-examples JAR"
+    echo "Looking in $GIRAPH_HOME"
+    exit 1
+fi
+
+echo "Using Giraph JAR: $GIRAPH_JAR"
+
+# Clean output directory if exists
+$HADOOP_HOME/bin/hdfs dfs -rm -r -f $OUTPUT_PATH 2>/dev/null || true
+
+# Record start time
+START_TIME=$(date +%s.%N)
+
+# Run Giraph PageRank
+echo ""
+echo "Starting PageRank computation..."
+echo ""
+
+$HADOOP_HOME/bin/hadoop jar $GIRAPH_JAR \
+    org.apache.giraph.GiraphRunner \
+    org.apache.giraph.examples.SimplePageRankComputation \
+    -vif org.apache.giraph.io.formats.JsonLongDoubleFloatDoubleVertexInputFormat \
+    -vip $INPUT_PATH \
+    -vof org.apache.giraph.io.formats.IdWithValueTextOutputFormat \
+    -op $OUTPUT_PATH \
+    -w $WORKERS \
+    -ca giraph.maxNumberOfSupersteps=$ITERATIONS \
+    -ca giraph.useSuperstepCounters=true
+
+# Record end time
+END_TIME=$(date +%s.%N)
+
+# Calculate elapsed time
+ELAPSED=$(echo "$END_TIME - $START_TIME" | bc)
+
+echo ""
+echo "=============================================="
+echo "      PageRank Completed!"
+echo "=============================================="
+echo "Execution Time: $ELAPSED seconds"
+echo "Output Path:    $OUTPUT_PATH"
+echo "=============================================="
+
+# Show results
+echo ""
+echo "PageRank Results:"
+echo "-----------------"
+$HADOOP_HOME/bin/hdfs dfs -cat $OUTPUT_PATH/part-* 2>/dev/null | head -20
+
+echo ""
+echo "Total vertices processed:"
+$HADOOP_HOME/bin/hdfs dfs -cat $OUTPUT_PATH/part-* 2>/dev/null | wc -l
+
+# Save timing to file for later comparison
+echo "$ELAPSED" >> /tmp/giraph_pagerank_times.txt
+echo ""
+echo "Timing saved to /tmp/giraph_pagerank_times.txt"

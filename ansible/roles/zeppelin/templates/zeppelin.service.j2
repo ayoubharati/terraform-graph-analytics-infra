@@ -11,12 +11,21 @@ Group=root
 Environment=JAVA_HOME={{ java_home }}
 Environment=ZEPPELIN_HOME={{ zeppelin_home }}
 Environment=ZEPPELIN_PORT={{ zeppelin_port }}
+Environment=SPARK_HOME={{ spark_home }}
+
+# Create run directory before starting
+ExecStartPre=/bin/mkdir -p {{ zeppelin_home }}/run
+ExecStartPre=/bin/mkdir -p {{ zeppelin_home }}/logs
 
 ExecStart={{ zeppelin_home }}/bin/zeppelin-daemon.sh start
 ExecStop={{ zeppelin_home }}/bin/zeppelin-daemon.sh stop
 ExecReload={{ zeppelin_home }}/bin/zeppelin-daemon.sh restart
 
 PIDFile={{ zeppelin_home }}/run/zeppelin.pid
+
+# Zeppelin can take a while to start
+TimeoutStartSec=300
+TimeoutStopSec=60
 
 Restart=on-failure
 RestartSec=10

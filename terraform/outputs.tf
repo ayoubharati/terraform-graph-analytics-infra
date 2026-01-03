@@ -52,6 +52,11 @@ output "zeppelin_public_ip" {
   value       = module.compute.zeppelin_public_ip
 }
 
+output "zeppelin_private_ip" {
+  description = "Zeppelin private IP address (for Spark driver callbacks)"
+  value       = module.compute.zeppelin_private_ip
+}
+
 output "spark_private_ip" {
   description = "Spark private IP address"
   value       = module.compute.spark_private_ip

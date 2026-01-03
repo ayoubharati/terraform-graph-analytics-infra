@@ -1,0 +1,446 @@
+---
+# =============================================================================
+# GIRAPH PLAYBOOK - Hadoop + Giraph Installation (on Spark server)
+# =============================================================================
+# Includes: Hadoop (HDFS + YARN), Giraph, sample graph data
+# Usage: ./run.sh playbooks/giraph.yml
+# =============================================================================
+
+- name: Configure Apache Giraph with Hadoop
+  hosts: spark
+  gather_facts: true
+  become: true
+  vars_files:
+    - ../variables/main.yml
+  
+  tasks:
+    # =========================================================================
+    # SECTION 1: INSTALL HADOOP
+    # =========================================================================
+    - name: Check if Hadoop is installed
+      stat:
+        path: "{{ hadoop_home }}/bin/hadoop"
+      register: hadoop_installed
+      tags: [hadoop]
+
+    - name: Remove partial Hadoop directory
+      file:
+        path: "{{ hadoop_home }}"
+        state: absent
+      when: not hadoop_installed.stat.exists
+      tags: [hadoop]
+
+    - name: Download Apache Hadoop (async - large file)
+      get_url:
+        url: "{{ hadoop_download_url }}"
+        dest: /tmp/hadoop.tgz
+        mode: '0644'
+        timeout: 900
+      when: not hadoop_installed.stat.exists
+      async: 900
+      poll: 30
+      tags: [hadoop]
+
+    - name: Extract Hadoop
+      unarchive:
+        src: /tmp/hadoop.tgz
+        dest: /opt
+        remote_src: yes
+      when: not hadoop_installed.stat.exists
+      tags: [hadoop]
+
+    - name: Rename Hadoop directory
+      command: mv /opt/hadoop-{{ hadoop_version }} {{ hadoop_home }}
+      when: not hadoop_installed.stat.exists
+      ignore_errors: true
+      tags: [hadoop]
+
+    - name: Clean up Hadoop download
+      file:
+        path: /tmp/hadoop.tgz
+        state: absent
+      tags: [hadoop]
+
+    # =========================================================================
+    # SECTION 2: CONFIGURE HADOOP
+    # =========================================================================
+    - name: Set Hadoop environment variables
+      template:
+        src: ../roles/giraph/templates/hadoop-env.sh.j2
+        dest: "{{ hadoop_home }}/etc/hadoop/hadoop-env.sh"
+        mode: '0755'
+      tags: [config]
+
+    - name: Configure core-site.xml
+      template:
+        src: ../roles/giraph/templates/core-site.xml.j2
+        dest: "{{ hadoop_home }}/etc/hadoop/core-site.xml"
+        mode: '0644'
+      tags: [config]
+
+    - name: Configure hdfs-site.xml
+      template:
+        src: ../roles/giraph/templates/hdfs-site.xml.j2
+        dest: "{{ hadoop_home }}/etc/hadoop/hdfs-site.xml"
+        mode: '0644'
+      tags: [config]
+
+    - name: Configure mapred-site.xml
+      template:
+        src: ../roles/giraph/templates/mapred-site.xml.j2
+        dest: "{{ hadoop_home }}/etc/hadoop/mapred-site.xml"
+        mode: '0644'
+      tags: [config]
+
+    - name: Configure yarn-site.xml
+      template:
+        src: ../roles/giraph/templates/yarn-site.xml.j2
+        dest: "{{ hadoop_home }}/etc/hadoop/yarn-site.xml"
+        mode: '0644'
+      tags: [config]
+
+    - name: Set global Hadoop environment variables
+      lineinfile:
+        path: /etc/profile.d/hadoop.sh
+        line: "{{ item }}"
+        create: yes
+        mode: '0644'
+      loop:
+        - "export HADOOP_HOME={{ hadoop_home }}"
+        - "export HADOOP_CONF_DIR={{ hadoop_home }}/etc/hadoop"
+        - "export PATH=$HADOOP_HOME/bin:$HADOOP_HOME/sbin:$PATH"
+        - "export JAVA_HOME={{ java_home }}"
+      tags: [config]
+
+    # =========================================================================
+    # SECTION 3: CREATE HADOOP DIRECTORIES
+    # =========================================================================
+    - name: Create Hadoop data directories
+      file:
+        path: "{{ item }}"
+        state: directory
+        owner: ubuntu
+        group: ubuntu
+        mode: '0755'
+      loop:
+        - /data/hadoop/hdfs/namenode
+        - /data/hadoop/hdfs/datanode
+        - /data/hadoop/yarn/local
+        - /data/hadoop/yarn/logs
+        - /var/log/hadoop
+      tags: [directories]
+
+    # =========================================================================
+    # SECTION 4: SETUP SSH FOR HADOOP
+    # =========================================================================
+    - name: Generate SSH key for hadoop user
+      user:
+        name: ubuntu
+        generate_ssh_key: yes
+        ssh_key_bits: 2048
+        ssh_key_file: /home/ubuntu/.ssh/id_rsa
+      tags: [ssh]
+
+    - name: Add SSH key to authorized_keys
+      authorized_key:
+        user: ubuntu
+        state: present
+        key: "{{ lookup('file', '/home/ubuntu/.ssh/id_rsa.pub') }}"
+      ignore_errors: true
+      tags: [ssh]
+
+    - name: Configure SSH to accept localhost
+      lineinfile:
+        path: /home/ubuntu/.ssh/config
+        line: "{{ item }}"
+        create: yes
+        mode: '0600'
+        owner: ubuntu
+        group: ubuntu
+      loop:
+        - "Host localhost"
+        - "    StrictHostKeyChecking no"
+        - "Host 0.0.0.0"
+        - "    StrictHostKeyChecking no"
+      tags: [ssh]
+
+    # =========================================================================
+    # SECTION 5: FORMAT HDFS
+    # =========================================================================
+    - name: Ensure Hadoop directories have correct ownership
+      file:
+        path: "{{ item }}"
+        state: directory
+        owner: ubuntu
+        group: ubuntu
+        mode: '0755'
+        recurse: yes
+      loop:
+        - /data/hadoop
+        - /var/log/hadoop
+      tags: [hdfs]
+
+    - name: Check if HDFS is formatted
+      stat:
+        path: /data/hadoop/hdfs/namenode/current
+      register: hdfs_formatted
+      tags: [hdfs]
+
+    - name: Format HDFS namenode
+      shell: |
+        source /etc/profile.d/hadoop.sh
+        {{ hadoop_home }}/bin/hdfs namenode -format -force
+      args:
+        executable: /bin/bash
+      become_user: ubuntu
+      when: not hdfs_formatted.stat.exists
+      environment:
+        JAVA_HOME: "{{ java_home }}"
+        HADOOP_HOME: "{{ hadoop_home }}"
+      tags: [hdfs]
+
+    # =========================================================================
+    # SECTION 6: CREATE HADOOP SYSTEMD SERVICES
+    # =========================================================================
+    - name: Create HDFS NameNode systemd service
+      template:
+        src: ../roles/giraph/templates/hdfs-namenode.service.j2
+        dest: /etc/systemd/system/hdfs-namenode.service
+        mode: '0644'
+      notify: Restart HDFS
+      tags: [service]
+
+    - name: Create HDFS DataNode systemd service
+      template:
+        src: ../roles/giraph/templates/hdfs-datanode.service.j2
+        dest: /etc/systemd/system/hdfs-datanode.service
+        mode: '0644'
+      notify: Restart HDFS
+      tags: [service]
+
+    - name: Create YARN ResourceManager systemd service
+      template:
+        src: ../roles/giraph/templates/yarn-resourcemanager.service.j2
+        dest: /etc/systemd/system/yarn-resourcemanager.service
+        mode: '0644'
+      notify: Restart YARN
+      tags: [service]
+
+    - name: Create YARN NodeManager systemd service
+      template:
+        src: ../roles/giraph/templates/yarn-nodemanager.service.j2
+        dest: /etc/systemd/system/yarn-nodemanager.service
+        mode: '0644'
+      notify: Restart YARN
+      tags: [service]
+
+    - name: Reload systemd daemon
+      systemd:
+        daemon_reload: yes
+      tags: [service]
+
+    - name: Enable and start HDFS NameNode
+      systemd:
+        name: hdfs-namenode
+        enabled: yes
+        state: started
+      tags: [service]
+
+    - name: Wait for NameNode to start
+      wait_for:
+        port: 9870
+        delay: 5
+        timeout: 120
+      ignore_errors: true
+      tags: [service]
+
+    - name: Enable and start HDFS DataNode
+      systemd:
+        name: hdfs-datanode
+        enabled: yes
+        state: started
+      tags: [service]
+
+    - name: Enable and start YARN ResourceManager
+      systemd:
+        name: yarn-resourcemanager
+        enabled: yes
+        state: started
+      tags: [service]
+
+    - name: Enable and start YARN NodeManager
+      systemd:
+        name: yarn-nodemanager
+        enabled: yes
+        state: started
+      tags: [service]
+
+    # =========================================================================
+    # SECTION 7: INSTALL GIRAPH
+    # =========================================================================
+    - name: Check if Giraph is installed
+      stat:
+        path: "{{ giraph_home }}/giraph-core"
+      register: giraph_installed
+      tags: [giraph]
+
+    - name: Create Giraph directory
+      file:
+        path: "{{ giraph_home }}"
+        state: directory
+        mode: '0755'
+      tags: [giraph]
+
+    - name: Download Giraph distribution (async)
+      get_url:
+        url: "https://archive.apache.org/dist/giraph/giraph-{{ giraph_version }}/giraph-dist-{{ giraph_version }}-hadoop2-bin.tar.gz"
+        dest: /tmp/giraph.tgz
+        mode: '0644'
+        timeout: 600
+      when: not giraph_installed.stat.exists
+      async: 600
+      poll: 20
+      tags: [giraph]
+
+    - name: Extract Giraph
+      unarchive:
+        src: /tmp/giraph.tgz
+        dest: "{{ giraph_home }}"
+        remote_src: yes
+        extra_opts: [--strip-components=1]
+      when: not giraph_installed.stat.exists
+      tags: [giraph]
+
+    - name: Clean up Giraph download
+      file:
+        path: /tmp/giraph.tgz
+        state: absent
+      tags: [giraph]
+
+    - name: Set Giraph environment variables
+      lineinfile:
+        path: /etc/profile.d/giraph.sh
+        line: "{{ item }}"
+        create: yes
+        mode: '0644'
+      loop:
+        - "export GIRAPH_HOME={{ giraph_home }}"
+        - "export PATH=$GIRAPH_HOME:$PATH"
+        - "export HADOOP_CLASSPATH=$GIRAPH_HOME/giraph-core/target/*:$GIRAPH_HOME/giraph-examples/target/*:$HADOOP_CLASSPATH"
+      tags: [giraph]
+
+    # =========================================================================
+    # SECTION 8: CREATE HDFS DIRECTORIES FOR GIRAPH
+    # =========================================================================
+    - name: Wait for HDFS to be available
+      shell: |
+        source /etc/profile.d/hadoop.sh
+        {{ hadoop_home }}/bin/hdfs dfs -ls /
+      args:
+        executable: /bin/bash
+      environment:
+        JAVA_HOME: "{{ java_home }}"
+        HADOOP_HOME: "{{ hadoop_home }}"
+      register: hdfs_check
+      until: hdfs_check.rc == 0
+      retries: 10
+      delay: 10
+      ignore_errors: true
+      tags: [hdfs]
+
+    - name: Create HDFS directories for Giraph
+      shell: |
+        source /etc/profile.d/hadoop.sh
+        {{ hadoop_home }}/bin/hdfs dfs -mkdir -p /user/ubuntu
+        {{ hadoop_home }}/bin/hdfs dfs -mkdir -p /giraph/input
+        {{ hadoop_home }}/bin/hdfs dfs -mkdir -p /giraph/output
+        {{ hadoop_home }}/bin/hdfs dfs -chown -R ubuntu:ubuntu /user/ubuntu || true
+        {{ hadoop_home }}/bin/hdfs dfs -chown -R ubuntu:ubuntu /giraph || true
+      args:
+        executable: /bin/bash
+      environment:
+        JAVA_HOME: "{{ java_home }}"
+        HADOOP_HOME: "{{ hadoop_home }}"
+      ignore_errors: true
+      tags: [hdfs]
+
+    # =========================================================================
+    # SECTION 9: CREATE TEST SCRIPTS
+    # =========================================================================
+    - name: Create Giraph PageRank test script
+      template:
+        src: ../roles/giraph/templates/run-giraph-pagerank.sh.j2
+        dest: /usr/local/bin/run-giraph-pagerank.sh
+        mode: '0755'
+      tags: [scripts]
+
+    - name: Create sample graph input file
+      copy:
+        content: |
+          [0,0,[[1,1],[3,3]]]
+          [1,0,[[0,1],[2,2],[3,1]]]
+          [2,0,[[1,2],[4,4]]]
+          [3,0,[[0,3],[1,1],[4,4]]]
+          [4,0,[[3,4],[2,4]]]
+        dest: /tmp/tiny_graph.txt
+        mode: '0644'
+      tags: [scripts]
+
+    - name: Upload sample graph to HDFS
+      shell: |
+        source /etc/profile.d/hadoop.sh
+        {{ hadoop_home }}/bin/hdfs dfs -put -f /tmp/tiny_graph.txt /giraph/input/
+      args:
+        executable: /bin/bash
+      environment:
+        JAVA_HOME: "{{ java_home }}"
+        HADOOP_HOME: "{{ hadoop_home }}"
+      ignore_errors: true
+      tags: [scripts]
+
+    # =========================================================================
+    # SECTION 10: HEALTH CHECK
+    # =========================================================================
+    - name: Check Hadoop services
+      shell: |
+        source /etc/profile.d/hadoop.sh
+        {{ hadoop_home }}/bin/hdfs dfsadmin -report 2>/dev/null | head -20
+      args:
+        executable: /bin/bash
+      environment:
+        JAVA_HOME: "{{ java_home }}"
+        HADOOP_HOME: "{{ hadoop_home }}"
+      register: hdfs_report
+      ignore_errors: true
+      tags: [verify]
+
+    - name: Print Giraph setup completion
+      debug:
+        msg: |
+          ✅ Apache Giraph + Hadoop installation completed!
+          
+          🐘 Hadoop Services:
+            - HDFS NameNode Web UI: http://{{ ansible_host }}:9870
+            - YARN ResourceManager: http://{{ ansible_host }}:8088
+          
+          📊 Giraph Home: {{ giraph_home }}
+          
+          🚀 To run PageRank example:
+            /usr/local/bin/run-giraph-pagerank.sh
+          
+          📈 HDFS Status:
+          {{ hdfs_report.stdout | default('Checking...') }}
+      tags: [always]
+
+  handlers:
+    - name: Restart HDFS
+      shell: |
+        systemctl restart hdfs-namenode
+        systemctl restart hdfs-datanode
+      ignore_errors: true
+
+    - name: Restart YARN
+      shell: |
+        systemctl restart yarn-resourcemanager
+        systemctl restart yarn-nodemanager
+      ignore_errors: true

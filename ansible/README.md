@@ -7,198 +7,154 @@ This Ansible project configures the EC2 instances for the Graph Analytics platfo
 ```
 ansible/
 ├── ansible.cfg              # Ansible configuration
+├── run.sh                   # Easy runner script (use from WSL)
 ├── inventory/
 │   ├── aws_ec2.yml          # Dynamic inventory (AUTO-DISCOVERS IPs!)
-│   └── hosts.yml            # Static inventory (fallback only)
+│   └── hosts.yml            # Static inventory (fallback)
 ├── playbooks/
-│   ├── site.yml             # Master playbook (runs all)
-│   ├── common.yml           # Base setup (all instances)
-│   ├── zeppelin.yml         # Apache Zeppelin
-│   ├── spark.yml            # Apache Spark + GraphX
-│   ├── neo4j.yml            # Neo4j Community
-│   └── test-connectivity.yml # Connectivity tests
+│   ├── site.yml             # Master playbook (runs all 4)
+│   ├── zeppelin.yml         # Zeppelin + Spark client + Data prep
+│   ├── spark.yml            # Spark Master/Worker + GraphX
+│   ├── giraph.yml           # Hadoop (HDFS/YARN) + Giraph
+│   └── neo4j.yml            # Neo4j + APOC + Data import
 ├── roles/
 │   ├── zeppelin/templates/  # Zeppelin config templates
 │   ├── spark/templates/     # Spark config templates
+│   ├── giraph/templates/    # Hadoop/Giraph config templates
 │   └── neo4j/templates/     # Neo4j config templates
 ├── variables/
 │   ├── main.yml             # Global variables
 │   └── secrets.yml          # YOUR SECRETS (create this, gitignored!)
-├── scripts/
-│   └── connectivity_test.py # Auto-discovers IPs from AWS!
 └── logs/                    # Ansible logs
 ```
-
-> **🔄 Dynamic Discovery**: IPs are discovered automatically from AWS - no manual updates needed!
 
 ## 🚀 Quick Start
 
 ### Prerequisites
 
-1. **Install Ansible**
+1. **Install Ansible (in WSL)**
    ```bash
-   # macOS/Linux
-   pip3 install ansible boto3 botocore
-   
-   # Windows (use WSL)
    sudo apt update && sudo apt install ansible python3-pip
    pip3 install boto3 botocore
-   ```
-
-2. **Install AWS EC2 Plugin**
-   ```bash
    ansible-galaxy collection install amazon.aws
    ```
 
-3. **Configure AWS Credentials**
+2. **Configure AWS Credentials**
    ```bash
    aws configure
-   # Or export:
-   export AWS_ACCESS_KEY_ID=xxx
-   export AWS_SECRET_ACCESS_KEY=xxx
-   export AWS_DEFAULT_REGION=eu-central-1
    ```
 
-4. **Configure SSH Key**
-   - Place your EC2 key at `~/.ssh/hajar-project-key.pem`
-   - Or update `ansible.cfg` with your key path
+3. **Create secrets.yml**
+   ```bash
+   cp variables/secrets.yml.template variables/secrets.yml
+   nano variables/secrets.yml
+   ```
 
 ### Running Playbooks
 
 ```bash
 cd ansible
 
-# Test connectivity to instances
-ansible all -m ping
+# Run ALL playbooks (complete setup)
+./run.sh playbooks/site.yml
 
-# Run complete setup
-ansible-playbook playbooks/site.yml
+# Run individual playbooks
+./run.sh playbooks/zeppelin.yml    # Zeppelin + Spark client
+./run.sh playbooks/spark.yml       # Spark Master/Worker
+./run.sh playbooks/giraph.yml      # Hadoop + Giraph
+./run.sh playbooks/neo4j.yml       # Neo4j database
 
-# Run specific component
-ansible-playbook playbooks/zeppelin.yml
-ansible-playbook playbooks/spark.yml
-ansible-playbook playbooks/neo4j.yml
+# Optional: Download dataset (after zeppelin.yml)
+./run.sh playbooks/zeppelin.yml --tags data
 
-# Run only common setup
-ansible-playbook playbooks/common.yml
-
-# Run connectivity tests
-ansible-playbook playbooks/test-connectivity.yml
+# Optional: Import dataset to Neo4j (after neo4j.yml and data)
+./run.sh playbooks/neo4j.yml --tags import
 ```
+
+## 📋 What Each Playbook Installs
+
+### 1. zeppelin.yml (Analytics Hub)
+- ✅ Common packages + Java 11
+- ✅ Apache Zeppelin 0.11.2
+- ✅ Apache Spark client (for driver)
+- ✅ Python packages (neo4j, pandas, numpy, matplotlib, networkx)
+- ✅ Data download from Kaggle (optional --tags data)
+
+### 2. spark.yml (Compute Cluster)
+- ✅ Common packages + Java 11
+- ✅ Apache Spark 3.5.0 Master + Worker
+- ✅ GraphX (included in Spark)
+- ✅ AWS S3 libraries
+
+### 3. giraph.yml (Graph Processing)
+- ✅ Apache Hadoop 3.3.6 (HDFS + YARN)
+- ✅ Apache Giraph 1.2.0
+- ✅ Sample graph data + PageRank script
+
+### 4. neo4j.yml (Graph Database)
+- ✅ Common packages + Java 17
+- ✅ Neo4j Community 5.x
+- ✅ APOC plugin
+- ✅ Data import from S3 (optional --tags import)
 
 ## 🔐 Secrets Management
 
 **⚠️ IMPORTANT:** Never commit `secrets.yml` to git!
 
-```bash
-# 1. Create your secrets file from the template
-cp variables/secrets.yml.example variables/secrets.yml
-
-# 2. Edit with your real passwords
-nano variables/secrets.yml
-
-# 3. (Optional) Encrypt with Ansible Vault
-ansible-vault encrypt variables/secrets.yml
-
-# 4. Run playbooks (with vault password if encrypted)
-ansible-playbook playbooks/site.yml --ask-vault-pass
+```yaml
+# variables/secrets.yml
+---
+neo4j_admin_password: "your-secure-password"
+kaggle_api_token: "your-kaggle-token"
 ```
 
-## 📋 What Gets Installed
+## 🧪 Recommended Run Order
 
-### Common (All Instances)
-- Java 11 OpenJDK
-- Python 3 + pip
-- AWS CLI
-- Base packages (curl, wget, git, vim, htop, etc.)
-- System tuning (file limits, swap)
-
-### Zeppelin Instance
-- Apache Zeppelin 0.10.1
-- Scala
-- PySpark
-- Neo4j Python driver
-- Data science packages (pandas, numpy, matplotlib, networkx)
-
-### Spark Instance
-- Apache Spark 3.5.0
-- GraphX (included)
-- AWS Hadoop libraries (S3 access)
-- Neo4j Spark Connector
-
-### Neo4j Instance
-- Neo4j Community 5.15.0
-- APOC plugin
-- Automated backup to S3
-
-## 🧪 Testing
-
-### Connectivity Tests
-
-Run the test script on each instance:
+For a fresh deployment:
 
 ```bash
-# From local machine (external tests only)
-python3 scripts/connectivity_test.py
+# 1. Run all base playbooks
+./run.sh playbooks/site.yml
 
-# Via Ansible (on all instances)
-ansible-playbook playbooks/test-connectivity.yml
+# 2. Download dataset
+./run.sh playbooks/zeppelin.yml --tags data
+
+# 3. Import to Neo4j
+./run.sh playbooks/neo4j.yml --tags import
+
+# 4. Open Zeppelin and test!
+# http://<zeppelin-public-ip>:8080
 ```
 
-### Service Health Checks
+## 📊 Service URLs (After Deployment)
 
-```bash
-# Check Zeppelin
-curl http://<alb-dns>:8080
-
-# Check Spark Master Web UI
-curl http://<spark-ip>:8081
-
-# Check Neo4j
-curl http://<neo4j-ip>:7474
-```
-
-## 🔧 Configuration
-
-Update `variables/main.yml` for customization:
-
-| Variable | Default | Description |
-|----------|---------|-------------|
-| `spark_version` | 3.5.0 | Spark version |
-| `zeppelin_version` | 0.10.1 | Zeppelin version |
-| `neo4j_version` | 5.15.0 | Neo4j version |
-| `spark_worker_memory` | 4g | Spark worker memory |
-| `neo4j_heap_max_size` | 2g | Neo4j max heap |
-
-## 📊 Post-Installation
-
-After running the playbooks:
-
-1. **Access Zeppelin** via ALB URL
-2. **Create a notebook** and connect to Spark
-3. **Test Neo4j** connection from Zeppelin
-4. **Upload datasets** to S3
-5. **Run graph analytics**!
+| Service | URL | Notes |
+|---------|-----|-------|
+| Zeppelin | http://\<zeppelin-ip\>:8080 | Public access |
+| Spark Master UI | http://\<spark-ip\>:8081 | Internal only |
+| HDFS NameNode UI | http://\<spark-ip\>:9870 | Internal only |
+| YARN ResourceManager | http://\<spark-ip\>:8088 | Internal only |
+| Neo4j Browser | http://\<neo4j-ip\>:7474 | Internal only |
+| Neo4j Bolt | bolt://\<neo4j-ip\>:7687 | Internal only |
 
 ## 🐛 Troubleshooting
 
-### Cannot connect to instances
-```bash
-# Check if instances are running
-aws ec2 describe-instances --filters "Name=tag:Name,Values=hajar-project-*" --query 'Reservations[*].Instances[*].[InstanceId,State.Name,PrivateIpAddress]' --output table
+### Timeout errors
+All large downloads use `async` - just wait or re-run the playbook.
 
+### SSH issues
+```bash
 # Test SSH directly
-ssh -i ~/.ssh/hajar-project-key.pem ubuntu@<ip>
+ssh -i ~/hajar-project-key.pem ubuntu@<ip>
 ```
 
-### Ansible hangs on "Gathering Facts"
-- Check security groups allow SSH (port 22)
-- Verify the SSH key is correct
-
-### Services not starting
+### Service not starting
 ```bash
 # Check logs on the instance
 sudo journalctl -u zeppelin -f
 sudo journalctl -u spark-master -f
 sudo journalctl -u neo4j -f
 ```
+
+### Neo4j Spark Connector version mismatch
+The connector is loaded via `--packages` in Zeppelin to ensure version consistency. Do NOT install it manually on the Spark server.

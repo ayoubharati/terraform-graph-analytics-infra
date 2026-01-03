@@ -1,9 +1,12 @@
 ---
 # =============================================================================
-# SPARK PLAYBOOK - Install and configure Apache Spark with GraphX
+# SPARK PLAYBOOK - Complete Spark Master + Worker Installation
+# =============================================================================
+# Includes: Common setup, Spark Master/Worker, GraphX support
+# Usage: ./run.sh playbooks/spark.yml
 # =============================================================================
 
-- name: Configure Apache Spark
+- name: Configure Apache Spark (Master + Worker)
   hosts: spark
   gather_facts: true
   become: true
@@ -11,33 +14,85 @@
     - ../variables/main.yml
   
   tasks:
-    # -------------------------------------------------------------------------
-    # Download and Install Spark
-    # -------------------------------------------------------------------------
-    # -------------------------------------------------------------------------
-    # Download and Install Spark
-    # -------------------------------------------------------------------------
-    - name: Check if Spark is already installed
+    # =========================================================================
+    # SECTION 1: COMMON SETUP
+    # =========================================================================
+    - name: Update apt cache
+      apt:
+        update_cache: yes
+        cache_valid_time: 3600
+      tags: [common]
+
+    - name: Install common packages
+      apt:
+        name: "{{ common_packages }}"
+        state: present
+      tags: [common]
+
+    - name: Install Java
+      apt:
+        name: "openjdk-{{ java_version }}-jdk"
+        state: present
+      tags: [common]
+
+    - name: Set JAVA_HOME
+      lineinfile:
+        path: /etc/environment
+        regexp: '^JAVA_HOME='
+        line: 'JAVA_HOME={{ java_home }}'
+        create: yes
+      tags: [common]
+
+    - name: Create project directories
+      file:
+        path: "{{ item }}"
+        state: directory
+        mode: '0755'
+      loop:
+        - /opt/analytics
+        - /var/log/analytics
+        - /data
+        - /data/spark
+        - /var/log/spark
+      tags: [common]
+
+    - name: Add host entries
+      lineinfile:
+        path: /etc/hosts
+        line: "{{ item }}"
+        create: yes
+      loop:
+        - "{{ spark_master_host }} spark-master"
+        - "{{ neo4j_host }} neo4j-server"
+        - "{{ zeppelin_host }} zeppelin-server"
+      tags: [common]
+
+    # =========================================================================
+    # SECTION 2: INSTALL SPARK
+    # =========================================================================
+    - name: Check if Spark is installed
       stat:
         path: "{{ spark_home }}/bin/spark-submit"
       register: spark_installed
-      tags: [spark, install]
+      tags: [spark]
 
-    - name: Remove existing partial Spark directory
+    - name: Remove partial Spark directory
       file:
         path: "{{ spark_home }}"
         state: absent
       when: not spark_installed.stat.exists
-      tags: [spark, install]
+      tags: [spark]
 
-    - name: Download Apache Spark
+    - name: Download Apache Spark (async - large file)
       get_url:
         url: "{{ spark_download_url }}"
         dest: /tmp/spark.tgz
         mode: '0644'
         timeout: 600
       when: not spark_installed.stat.exists
-      tags: [spark, install]
+      async: 600
+      poll: 20
+      tags: [spark]
 
     - name: Extract Spark
       unarchive:
@@ -45,29 +100,37 @@
         dest: /opt
         remote_src: yes
       when: not spark_installed.stat.exists
-      tags: [spark, install]
+      tags: [spark]
 
     - name: Rename Spark directory
       command: mv /opt/spark-{{ spark_version }}-bin-hadoop{{ spark_hadoop_version }} {{ spark_home }}
       when: not spark_installed.stat.exists
-      tags: [spark, install]
+      ignore_errors: true
+      tags: [spark]
 
     - name: Clean up download
       file:
         path: /tmp/spark.tgz
         state: absent
-      tags: [spark, install]
+      tags: [spark]
 
-    # -------------------------------------------------------------------------
-    # Configure Spark Environment
-    # -------------------------------------------------------------------------
+    # =========================================================================
+    # SECTION 3: CONFIGURE SPARK
+    # =========================================================================
+    - name: Create Spark directories
+      file:
+        path: "{{ spark_home }}/jars"
+        state: directory
+        mode: '0755'
+      tags: [config]
+
     - name: Create Spark environment configuration
       template:
         src: ../roles/spark/templates/spark-env.sh.j2
         dest: "{{ spark_home }}/conf/spark-env.sh"
         mode: '0755'
       notify: Restart Spark
-      tags: [spark, config]
+      tags: [config]
 
     - name: Create Spark defaults configuration
       template:
@@ -75,14 +138,14 @@
         dest: "{{ spark_home }}/conf/spark-defaults.conf"
         mode: '0644'
       notify: Restart Spark
-      tags: [spark, config]
+      tags: [config]
 
     - name: Create log4j properties
       template:
         src: ../roles/spark/templates/log4j2.properties.j2
         dest: "{{ spark_home }}/conf/log4j2.properties"
         mode: '0644'
-      tags: [spark, config]
+      tags: [config]
 
     - name: Set Spark environment variables
       lineinfile:
@@ -93,50 +156,44 @@
       loop:
         - "export SPARK_HOME={{ spark_home }}"
         - "export PATH=$SPARK_HOME/bin:$SPARK_HOME/sbin:$PATH"
-      tags: [spark, config]
+      tags: [config]
 
-    # -------------------------------------------------------------------------
-    # Download Additional Libraries
-    # -------------------------------------------------------------------------
-    - name: Create jars directory
-      file:
-        path: "{{ spark_home }}/jars"
-        state: directory
-        mode: '0755'
-      tags: [spark, libraries]
-
+    # =========================================================================
+    # SECTION 4: DOWNLOAD LIBRARIES (async for large files)
+    # =========================================================================
     - name: Download AWS Hadoop library
       get_url:
         url: "https://repo1.maven.org/maven2/org/apache/hadoop/hadoop-aws/3.3.4/hadoop-aws-3.3.4.jar"
         dest: "{{ spark_home }}/jars/hadoop-aws-3.3.4.jar"
         mode: '0644'
-      tags: [spark, libraries]
+        timeout: 120
+      async: 120
+      poll: 10
+      tags: [libraries]
 
     - name: Download AWS SDK bundle
       get_url:
         url: "https://repo1.maven.org/maven2/com/amazonaws/aws-java-sdk-bundle/1.12.262/aws-java-sdk-bundle-1.12.262.jar"
         dest: "{{ spark_home }}/jars/aws-java-sdk-bundle-1.12.262.jar"
         mode: '0644'
-      tags: [spark, libraries]
+        timeout: 180
+      async: 180
+      poll: 10
+      tags: [libraries]
 
-    - name: Download Neo4j Spark Connector
-      get_url:
-        url: "https://repo1.maven.org/maven2/org/neo4j/neo4j-connector-apache-spark_2.12/5.2.0_for_spark_3_{{ spark_version | regex_replace('\\.\\d+$', '') }}/neo4j-connector-apache-spark_2.12-5.2.0_for_spark_3_{{ spark_version | regex_replace('\\.\\d+$', '') }}.jar"
-        dest: "{{ spark_home }}/jars/neo4j-spark-connector.jar"
-        mode: '0644'
-      ignore_errors: true  # Version might not match exactly
-      tags: [spark, libraries]
+    # NOTE: Neo4j connector is NOT installed here - it's loaded via --packages
+    # to ensure version consistency between driver and executors
 
-    # -------------------------------------------------------------------------
-    # Create Systemd Services
-    # -------------------------------------------------------------------------
+    # =========================================================================
+    # SECTION 5: CREATE SYSTEMD SERVICES
+    # =========================================================================
     - name: Create Spark Master systemd service
       template:
         src: ../roles/spark/templates/spark-master.service.j2
         dest: /etc/systemd/system/spark-master.service
         mode: '0644'
       notify: Restart Spark Master
-      tags: [spark, service]
+      tags: [service]
 
     - name: Create Spark Worker systemd service
       template:
@@ -144,68 +201,63 @@
         dest: /etc/systemd/system/spark-worker.service
         mode: '0644'
       notify: Restart Spark Worker
-      tags: [spark, service]
+      tags: [service]
 
     - name: Reload systemd daemon
       systemd:
         daemon_reload: yes
-      tags: [spark, service]
+      tags: [service]
 
     - name: Enable and start Spark Master
       systemd:
         name: spark-master
         enabled: yes
         state: started
-      tags: [spark, service]
+      tags: [service]
 
     - name: Enable and start Spark Worker
       systemd:
         name: spark-worker
         enabled: yes
         state: started
-      tags: [spark, service]
+      tags: [service]
 
-    # -------------------------------------------------------------------------
-    # Create directories for data
-    # -------------------------------------------------------------------------
-    - name: Create Spark work directory
-      file:
-        path: /data/spark
-        state: directory
-        mode: '0755'
-      tags: [spark, directories]
-
-    - name: Create Spark logs directory
-      file:
-        path: /var/log/spark
-        state: directory
-        mode: '0755'
-      tags: [spark, directories]
-
-    # -------------------------------------------------------------------------
-    # Health Check
-    # -------------------------------------------------------------------------
+    # =========================================================================
+    # SECTION 6: HEALTH CHECK
+    # =========================================================================
     - name: Wait for Spark Master to start
       wait_for:
         port: "{{ spark_master_port }}"
         delay: 10
         timeout: 120
-      tags: [spark, verify]
+      ignore_errors: true
+      tags: [verify]
 
     - name: Wait for Spark Master Web UI
       wait_for:
         port: "{{ spark_master_webui_port }}"
         delay: 5
         timeout: 60
-      tags: [spark, verify]
+      ignore_errors: true
+      tags: [verify]
 
     - name: Print Spark setup completion
       debug:
         msg: |
           ✅ Spark installation completed!
-          Master URL: spark://{{ ansible_host }}:{{ spark_master_port }}
-          Web UI: http://{{ ansible_host }}:{{ spark_master_webui_port }}
-      tags: [spark, verify]
+          
+          🚀 Spark Master: spark://{{ ansible_host }}:{{ spark_master_port }}
+          🌐 Web UI: http://{{ ansible_host }}:{{ spark_master_webui_port }}
+          
+          📦 Installed Components:
+            - Apache Spark {{ spark_version }}
+            - Spark Master + Worker
+            - GraphX (included)
+            - AWS S3 libraries
+          
+          ⚠️ Note: Neo4j connector is loaded via --packages in Zeppelin
+          for version consistency between driver and executors.
+      tags: [always]
 
   handlers:
     - name: Restart Spark

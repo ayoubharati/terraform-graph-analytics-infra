@@ -1,6 +1,9 @@
 ---
 # =============================================================================
-# NEO4J PLAYBOOK - Install and configure Neo4j Community Edition
+# NEO4J PLAYBOOK - Complete Neo4j Installation + Data Import
+# =============================================================================
+# Includes: Common setup, Neo4j, APOC plugin, Data import from S3
+# Usage: ./run.sh playbooks/neo4j.yml
 # =============================================================================
 
 - name: Configure Neo4j Database
@@ -12,9 +15,63 @@
     - ../variables/secrets.yml
   
   tasks:
-    # -------------------------------------------------------------------------
-    # Add Neo4j Repository
-    # -------------------------------------------------------------------------
+    # =========================================================================
+    # SECTION 1: COMMON SETUP
+    # =========================================================================
+    - name: Update apt cache
+      apt:
+        update_cache: yes
+        cache_valid_time: 3600
+      tags: [common]
+
+    - name: Install common packages
+      apt:
+        name: "{{ common_packages }}"
+        state: present
+      tags: [common]
+
+    - name: Create project directories
+      file:
+        path: "{{ item }}"
+        state: directory
+        mode: '0755'
+      loop:
+        - /opt/analytics
+        - /var/log/analytics
+        - /data
+        - /data/neo4j
+      tags: [common]
+
+    - name: Add host entries
+      lineinfile:
+        path: /etc/hosts
+        line: "{{ item }}"
+        create: yes
+      loop:
+        - "{{ spark_master_host }} spark-master"
+        - "{{ neo4j_host }} neo4j-server"
+        - "{{ zeppelin_host }} zeppelin-server"
+      tags: [common]
+
+    - name: Configure AWS CLI
+      file:
+        path: /root/.aws
+        state: directory
+        mode: '0700'
+      tags: [common]
+
+    - name: Set AWS region
+      ini_file:
+        path: /root/.aws/config
+        section: default
+        option: region
+        value: "{{ aws_region }}"
+        mode: '0600'
+      tags: [common]
+
+    # =========================================================================
+    # SECTION 2: ADD NEO4J REPOSITORY
+    # =========================================================================
     - name: Install required packages for repository
       apt:
         name:
@@ -22,66 +79,63 @@
           - ca-certificates
           - gnupg
         state: present
-      tags: [neo4j, repo]
+      tags: [neo4j]
 
     - name: Add Neo4j GPG key
       apt_key:
         url: https://debian.neo4j.com/neotechnology.gpg.key
         state: present
-      tags: [neo4j, repo]
+      tags: [neo4j]
 
     - name: Add Neo4j repository
       apt_repository:
         repo: "deb https://debian.neo4j.com stable 5"
         state: present
         filename: neo4j
-      tags: [neo4j, repo]
+      tags: [neo4j]
 
-    - name: Update apt cache
+    - name: Update apt cache after adding repo
       apt:
         update_cache: yes
-      tags: [neo4j, repo]
+      tags: [neo4j]
 
+    # =========================================================================
+    # SECTION 3: INSTALL JAVA 17 & NEO4J
+    # =========================================================================
     - name: Install Java 17 (Required for Neo4j 5.x)
       apt:
         name: openjdk-17-jdk
         state: present
-      tags: [neo4j, java]
+      tags: [neo4j]
 
-    # -------------------------------------------------------------------------
-    # Install Neo4j
-    # -------------------------------------------------------------------------
     - name: Install Neo4j Community Edition
       apt:
         name: neo4j
         state: present
-      tags: [neo4j, install]
+      tags: [neo4j]
 
-    # -------------------------------------------------------------------------
-    # Configure Neo4j
-    # -------------------------------------------------------------------------
-    - name: Configure Neo4j - Listen on all interfaces
+    # =========================================================================
+    # SECTION 4: CONFIGURE NEO4J
+    # =========================================================================
+    - name: Configure Neo4j settings
       lineinfile:
         path: /etc/neo4j/neo4j.conf
         regexp: "{{ item.regexp }}"
         line: "{{ item.line }}"
         create: yes
       loop:
-        # Network configuration
         - { regexp: '^#?server.default_listen_address=', line: 'server.default_listen_address=0.0.0.0' }
         - { regexp: '^#?server.bolt.listen_address=', line: 'server.bolt.listen_address=0.0.0.0:7687' }
         - { regexp: '^#?server.http.listen_address=', line: 'server.http.listen_address=0.0.0.0:7474' }
         - { regexp: '^#?server.https.listen_address=', line: 'server.https.listen_address=0.0.0.0:7473' }
-        # Memory configuration
         - { regexp: '^#?server.memory.heap.initial_size=', line: 'server.memory.heap.initial_size={{ neo4j_heap_initial_size }}' }
         - { regexp: '^#?server.memory.heap.max_size=', line: 'server.memory.heap.max_size={{ neo4j_heap_max_size }}' }
         - { regexp: '^#?server.memory.pagecache.size=', line: 'server.memory.pagecache.size={{ neo4j_pagecache_size }}' }
-        # Logging
         - { regexp: '^#?server.directories.logs=', line: 'server.directories.logs=/var/log/neo4j' }
       notify: Restart Neo4j
-      tags: [neo4j, config]
+      tags: [config]
 
-    - name: Configure APOC plugin (if needed)
+    - name: Configure APOC plugin
       blockinfile:
         path: /etc/neo4j/neo4j.conf
         block: |
@@ -90,61 +144,77 @@
           dbms.security.procedures.allowlist=apoc.*
         marker: "# {mark} ANSIBLE MANAGED - APOC CONFIG"
       notify: Restart Neo4j
-      tags: [neo4j, config]
+      tags: [config]
 
-    # -------------------------------------------------------------------------
-    # Create Data Directories
-    # -------------------------------------------------------------------------
-    - name: Create Neo4j data directory
+    # =========================================================================
+    # SECTION 5: CREATE DIRECTORIES
+    # =========================================================================
+    - name: Create Neo4j directories
       file:
-        path: /data/neo4j
+        path: "{{ item }}"
         state: directory
         owner: neo4j
         group: neo4j
         mode: '0755'
-      tags: [neo4j, directories]
+      loop:
+        - /data/neo4j
+        - /var/lib/neo4j/import
+      tags: [directories]
 
-    - name: Create Neo4j import directory
-      file:
-        path: /var/lib/neo4j/import
-        state: directory
-        owner: neo4j
-        group: neo4j
-        mode: '0755'
-      tags: [neo4j, directories]
-
-    # -------------------------------------------------------------------------
-    # Start Neo4j Service
-    # -------------------------------------------------------------------------
+    # =========================================================================
+    # SECTION 6: START NEO4J
+    # =========================================================================
     - name: Enable and start Neo4j
       systemd:
         name: neo4j
         enabled: yes
         state: started
-      tags: [neo4j, service]
+      tags: [service]
 
     - name: Wait for Neo4j to start
       wait_for:
         port: "{{ neo4j_bolt_port }}"
         delay: 15
-        timeout: 120
-      tags: [neo4j, service]
+        timeout: 180
+      ignore_errors: true
+      tags: [service]
 
-    # -------------------------------------------------------------------------
-    # Set Initial Password
-    # -------------------------------------------------------------------------
+    # =========================================================================
+    # SECTION 7: SET PASSWORD
+    # =========================================================================
+    - name: Set Java 17 as default
+      alternatives:
+        name: java
+        path: /usr/lib/jvm/java-17-openjdk-amd64/bin/java
+      ignore_errors: true
+      tags: [password]
+
     - name: Check if password has been set
       stat:
         path: /var/lib/neo4j/.password_set
       register: password_set
-      tags: [neo4j, password]
+      tags: [password]
 
-    - name: Set Neo4j admin password
-      command: >
-        neo4j-admin dbms set-initial-password "{{ neo4j_admin_password }}"
+    - name: Clear existing auth data
+      file:
+        path: "{{ item }}"
+        state: absent
+      loop:
+        - /var/lib/neo4j/data/dbms/auth
+        - /var/lib/neo4j/data/dbms/auth.ini
       when: not password_set.stat.exists
       ignore_errors: true
-      tags: [neo4j, password]
+      tags: [password]
+
+    - name: Set Neo4j admin password
+      shell: |
+        export JAVA_HOME=/usr/lib/jvm/java-17-openjdk-amd64
+        neo4j-admin dbms set-initial-password "{{ neo4j_admin_password }}"
+      environment:
+        JAVA_HOME: /usr/lib/jvm/java-17-openjdk-amd64
+      when: not password_set.stat.exists
+      ignore_errors: true
+      tags: [password]
 
     - name: Mark password as set
       file:
@@ -152,24 +222,26 @@
         state: touch
         mode: '0600'
       when: not password_set.stat.exists
-      tags: [neo4j, password]
+      tags: [password]
 
     - name: Restart Neo4j after password change
       systemd:
         name: neo4j
         state: restarted
       when: not password_set.stat.exists
-      tags: [neo4j, password]
+      tags: [password]
 
-    # -------------------------------------------------------------------------
-    # Install APOC Plugin
-    # -------------------------------------------------------------------------
-    - name: Get Neo4j version
-      command: neo4j version
-      register: neo4j_version_output
-      changed_when: false
-      tags: [neo4j, apoc]
+    - name: Wait for Neo4j after restart
+      wait_for:
+        port: "{{ neo4j_bolt_port }}"
+        delay: 10
+        timeout: 120
+      ignore_errors: true
+      tags: [password]
 
+    # =========================================================================
+    # SECTION 8: INSTALL APOC PLUGIN
+    # =========================================================================
     - name: Download APOC plugin
       get_url:
         url: "https://github.com/neo4j/apoc/releases/download/5.15.0/apoc-5.15.0-core.jar"
@@ -177,20 +249,106 @@
         owner: neo4j
         group: neo4j
         mode: '0644'
+        timeout: 120
       notify: Restart Neo4j
       ignore_errors: true
-      tags: [neo4j, apoc]
+      tags: [apoc]
 
-    # -------------------------------------------------------------------------
-    # Backup Script
-    # -------------------------------------------------------------------------
+    # =========================================================================
+    # SECTION 9: IMPORT DATA (Optional - run with tag 'import')
+    # =========================================================================
+    - name: Install AWS CLI for import tasks
+      shell: pip3 install awscli boto3 --break-system-packages
+      args:
+        executable: /bin/bash
+      tags: [import, never]
+
+    - name: Download nodes.csv from S3
+      shell: |
+        aws s3 cp s3://{{ s3_data_bucket }}/elliptic/neo4j-import/nodes.csv /var/lib/neo4j/import/nodes.csv
+      ignore_errors: true
+      tags: [import, never]
+
+    - name: Download edges.csv from S3
+      shell: |
+        aws s3 cp s3://{{ s3_data_bucket }}/elliptic/neo4j-import/edges.csv /var/lib/neo4j/import/edges.csv
+      ignore_errors: true
+      tags: [import, never]
+
+    - name: Set ownership on import files
+      file:
+        path: "{{ item }}"
+        owner: neo4j
+        group: neo4j
+        mode: '0644'
+      loop:
+        - /var/lib/neo4j/import/nodes.csv
+        - /var/lib/neo4j/import/edges.csv
+      ignore_errors: true
+      tags: [import, never]
+
+    - name: Clear existing data for fresh import
+      shell: |
+        JAVA_HOME=/usr/lib/jvm/java-17-openjdk-amd64 cypher-shell -u neo4j -p '{{ neo4j_admin_password }}' \
+          "MATCH (n) DETACH DELETE n"
+      ignore_errors: true
+      tags: [import, never]
+
+    - name: Create constraint on txId
+      shell: |
+        JAVA_HOME=/usr/lib/jvm/java-17-openjdk-amd64 cypher-shell -u neo4j -p '{{ neo4j_admin_password }}' \
+          "CREATE CONSTRAINT tx_id IF NOT EXISTS FOR (t:Transaction) REQUIRE t.txId IS UNIQUE"
+      ignore_errors: true
+      tags: [import, never]
+
+    - name: Import Transaction nodes from CSV
+      shell: |
+        JAVA_HOME=/usr/lib/jvm/java-17-openjdk-amd64 cypher-shell -u neo4j -p '{{ neo4j_admin_password }}' << 'EOF'
+        LOAD CSV WITH HEADERS FROM 'file:///nodes.csv' AS row
+        CREATE (t:Transaction {
+          txId: toInteger(row.`txId:ID`),
+          label: row.label,
+          feature1: toFloat(row.`feature1:float`)
+        })
+        EOF
+      async: 600
+      poll: 30
+      tags: [import, never]
+
+    - name: Import relationships from CSV
+      shell: |
+        JAVA_HOME=/usr/lib/jvm/java-17-openjdk-amd64 cypher-shell -u neo4j -p '{{ neo4j_admin_password }}' << 'EOF'
+        LOAD CSV WITH HEADERS FROM 'file:///edges.csv' AS row
+        MATCH (from:Transaction {txId: toInteger(row.`:START_ID`)})
+        MATCH (to:Transaction {txId: toInteger(row.`:END_ID`)})
+        CREATE (from)-[:TRANSFERS_TO]->(to)
+        EOF
+      async: 900
+      poll: 30
+      tags: [import, never]
+
+    - name: Verify import - count nodes
+      shell: |
+        JAVA_HOME=/usr/lib/jvm/java-17-openjdk-amd64 cypher-shell -u neo4j -p '{{ neo4j_admin_password }}' \
+          "MATCH (t:Transaction) RETURN count(t) as nodeCount"
+      register: node_count
+      tags: [import, never]
+
+    - name: Show import result
+      debug:
+        msg: "Import complete: {{ node_count.stdout | default('Check manually') }}"
+      tags: [import, never]
+
+    # =========================================================================
+    # SECTION 10: BACKUP SCRIPT
+    # =========================================================================
     - name: Create backup script
       template:
         src: ../roles/neo4j/templates/neo4j-backup.sh.j2
         dest: /usr/local/bin/neo4j-backup.sh
         mode: '0755'
       when: enable_neo4j_backup
-      tags: [neo4j, backup]
+      tags: [backup]
 
     - name: Create backup cron job
       cron:
@@ -200,27 +358,27 @@
         job: "/usr/local/bin/neo4j-backup.sh >> /var/log/neo4j/backup.log 2>&1"
         user: neo4j
       when: enable_neo4j_backup
-      tags: [neo4j, backup]
+      tags: [backup]
 
-    # -------------------------------------------------------------------------
-    # Health Check
-    # -------------------------------------------------------------------------
-    - name: Wait for Neo4j HTTP to be accessible
-      wait_for:
-        port: "{{ neo4j_http_port }}"
-        delay: 10
-        timeout: 120
-      tags: [neo4j, verify]
-
+    # =========================================================================
+    # SUMMARY
+    # =========================================================================
     - name: Print Neo4j setup completion
       debug:
         msg: |
           ✅ Neo4j installation completed!
-          Browser: http://{{ ansible_host }}:{{ neo4j_http_port }}
-          Bolt: bolt://{{ ansible_host }}:{{ neo4j_bolt_port }}
-          Username: neo4j
-          Password: (see secrets.yml)
-      tags: [neo4j, verify]
+          
+          🌐 Neo4j Browser: http://{{ ansible_host }}:{{ neo4j_http_port }}
+          🔌 Bolt: bolt://{{ ansible_host }}:{{ neo4j_bolt_port }}
+          👤 Username: neo4j
+          🔑 Password: (see secrets.yml)
+          
+          📝 To import data, run:
+            ./run.sh playbooks/neo4j.yml --tags import
+          
+          ⚠️ Make sure data-preparation has been run first!
+            (./run.sh playbooks/zeppelin.yml --tags data)
+      tags: [always]
 
   handlers:
     - name: Restart Neo4j

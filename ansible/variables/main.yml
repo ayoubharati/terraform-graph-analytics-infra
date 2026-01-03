@@ -42,9 +42,16 @@ giraph_version: "1.2.0"
 giraph_home: "/opt/giraph"
 
 # -----------------------------------------------------------------------------
+# Apache Hadoop Configuration (Required for Giraph)
+# -----------------------------------------------------------------------------
+hadoop_version: "3.3.6"
+hadoop_home: "/opt/hadoop"
+hadoop_download_url: "https://archive.apache.org/dist/hadoop/common/hadoop-{{ hadoop_version }}/hadoop-{{ hadoop_version }}.tar.gz"
+
+# -----------------------------------------------------------------------------
 # Apache Zeppelin Configuration
 # -----------------------------------------------------------------------------
-zeppelin_version: "0.10.1"
+zeppelin_version: "0.11.2"
 zeppelin_home: "/opt/zeppelin"
 zeppelin_download_url: "https://dlcdn.apache.org/zeppelin/zeppelin-{{ zeppelin_version }}/zeppelin-{{ zeppelin_version }}-bin-all.tgz"
 zeppelin_port: 8080
@@ -74,9 +81,13 @@ neo4j_pagecache_size: "2g"
 # Network Configuration
 # -----------------------------------------------------------------------------
 # These will be automatically discovered or set via inventory
+# For Spark master - use private IP (in private subnet)
 spark_master_host: "{{ hostvars[groups['spark'][0]]['ansible_host'] | default('10.10.11.100') }}"
+# For Neo4j - use private IP (in private subnet)
 neo4j_host: "{{ hostvars[groups['neo4j'][0]]['ansible_host'] | default('10.10.11.101') }}"
-zeppelin_host: "{{ hostvars[groups['zeppelin'][0]]['ansible_host'] | default('10.10.1.100') }}"
+# For Zeppelin driver - MUST use private IP for Spark workers to callback
+# Set this in inventory as zeppelin_private_ip, or use ansible_default_ipv4.address
+zeppelin_host: "{{ hostvars[groups['zeppelin'][0]]['zeppelin_private_ip'] | default(hostvars[groups['zeppelin'][0]]['ansible_default_ipv4']['address']) | default('10.10.1.100') }}"
 
 # VPC CIDR for security rules
 vpc_cidr: "10.10.0.0/16"

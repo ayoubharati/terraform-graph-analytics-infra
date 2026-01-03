@@ -1,0 +1,18 @@
+[Unit]
+Description=YARN ResourceManager
+After=network.target hdfs-namenode.service
+
+[Service]
+Type=forking
+User=ubuntu
+Group=ubuntu
+Environment="JAVA_HOME={{ java_home }}"
+Environment="HADOOP_HOME={{ hadoop_home }}"
+Environment="HADOOP_CONF_DIR={{ hadoop_home }}/etc/hadoop"
+ExecStart={{ hadoop_home }}/bin/yarn --daemon start resourcemanager
+ExecStop={{ hadoop_home }}/bin/yarn --daemon stop resourcemanager
+Restart=on-failure
+RestartSec=10
+
+[Install]
+WantedBy=multi-user.target

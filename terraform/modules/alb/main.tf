@@ -67,6 +67,15 @@ resource "aws_security_group" "zeppelin" {
     security_groups = [aws_security_group.alb.id]
   }
 
+  # Spark driver callback from private subnet (Spark workers connect back to driver)
+  ingress {
+    description = "Spark driver ports from private subnet"
+    from_port   = 0
+    to_port     = 65535
+    protocol    = "tcp"
+    cidr_blocks = [var.private_subnet_cidr]
+  }
+
   # All outbound
   egress {
     from_port   = 0
